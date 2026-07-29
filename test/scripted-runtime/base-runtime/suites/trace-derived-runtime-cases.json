@@ -1,0 +1,1126 @@
+{
+  "suite_id": "base-runtime-trace-derived-runtime-cases",
+  "name": "BaseRuntime Trace-Derived IM Runtime Cases",
+  "version": "0.1.0",
+  "description": "Five Scripted Runtime Test cases derived from real IM runtime archetypes. Each case drives the real Runtime with prewritten model actions.",
+  "source": "docs/evaluation/SPEC.md#target-architecture",
+  "decision_policy": {
+    "fail_on_any_hard_failure": true,
+    "fail_on_required_artifact_failure": true,
+    "block_on_missing_evidence": true,
+    "min_pass_rate": 1
+  },
+  "cases": [
+    {
+      "case_id": "base-runtime.trace-derived.artifact-locator.001",
+      "name": "BaseRuntime finds and resends an artifact with proof",
+      "lane": "requirement_acceptance",
+      "target_module": "runtime",
+      "risk_level": "release_blocking",
+      "task": "The user cannot find a report that XiaoBa previously said was ready. The runtime must search local evidence, inspect the index, send the correct file, and cite the path.",
+      "replay": {
+        "mode": "surface_runtime",
+        "surface": "pet",
+        "capture_internal_trace": true,
+        "user_message": "Pet 模式里当无角色小八 runtime：刚才你说报告写好了，但我找不到。别猜，帮我从 workspace 里找证据，并把正确文件重新发我。",
+        "surface_event": {
+          "event_id": "pet-base-runtime-trace-artifact-locator-001",
+          "event_type": "pet.message",
+          "user_ref": "pet:alpha-puff:role-base:trace-artifact-locator",
+          "raw": {
+            "sessionKey": "pet:alpha-puff:role-base:trace-artifact-locator"
+          }
+        },
+        "workspace_files": [
+          {
+            "path": "runtime-evidence/draft-report.md",
+            "content": "# Draft Report\n\nStatus: obsolete draft. Do not send this as the final report.\n"
+          },
+          {
+            "path": "runtime-evidence/final-report.md",
+            "content": "# Final Runtime Report\n\nStatus: final.\n\nEvidence: this is the report the user asked XiaoBa to resend.\n"
+          },
+          {
+            "path": "runtime-evidence/report-index.json",
+            "content": "{\n  \"latest\": \"runtime-evidence/final-report.md\",\n  \"status\": \"ready\",\n  \"reason\": \"final report approved\"\n}\n"
+          }
+        ],
+        "model_responses": [
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-artifact-glob",
+                "name": "glob",
+                "arguments": {
+                  "pattern": "*report*",
+                  "path": "runtime-evidence",
+                  "limit": 20
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 900,
+              "completion_tokens": 90
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-artifact-read-index",
+                "name": "read_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/report-index.json",
+                  "limit": 80
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 950,
+              "completion_tokens": 100
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-artifact-send-file",
+                "name": "send_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/final-report.md",
+                  "file_name": "final-report.md"
+                }
+              },
+              {
+                "id": "call-trace-artifact-send-text",
+                "name": "send_text",
+                "arguments": {
+                  "text": "找到了，不是猜的：我先用 glob 搜了 runtime-evidence 下的 report 文件，再读取 runtime-evidence/report-index.json，里面标记 latest 是 runtime-evidence/final-report.md。正确文件 final-report.md 已通过 send_file 重新发出。"
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 980,
+              "completion_tokens": 180
+            }
+          },
+          {
+            "content": "",
+            "usage": {
+              "prompt_tokens": 100,
+              "completion_tokens": 0
+            }
+          }
+        ]
+      },
+      "hard_verifiers": [
+        {
+          "id": "jsonl_parse"
+        },
+        {
+          "id": "tool_transcript_completeness"
+        },
+        {
+          "id": "tool_result_contract"
+        },
+        {
+          "id": "runtime_observability"
+        },
+        {
+          "id": "surface_runtime_e2e",
+          "config": {
+            "expected_surface": "pet",
+            "expected_runtime_id": "pet_channel_router",
+            "expected_status_code": 200,
+            "expected_session_key": "pet:alpha-puff:role-base:trace-artifact-locator",
+            "expected_channel_id": "pet:alpha-puff:role-base:trace-artifact-locator",
+            "required_event_types": [
+              "user_message",
+              "state",
+              "tool_start",
+              "tool_end",
+              "file",
+              "text",
+              "done"
+            ],
+            "user_message_contains": [
+              "报告写好了",
+              "别猜"
+            ],
+            "min_visible_deliveries": 2,
+            "min_file_deliveries": 1,
+            "required_files": [
+              "final-report.md"
+            ],
+            "require_file_artifacts": true
+          }
+        },
+        {
+          "id": "delivery_evidence_contract",
+          "config": {
+            "min_delivery_evidence": 2,
+            "require_delivery_tools": true,
+            "require_file_artifact": true,
+            "min_external_receipts": 2,
+            "required_external_receipt_types": [
+              "file"
+            ]
+          }
+        },
+        {
+          "id": "channel_delivery",
+          "config": {
+            "min_deliveries": 2,
+            "min_text_deliveries": 1,
+            "min_file_deliveries": 1,
+            "required_texts": [
+              "runtime-evidence/report-index.json",
+              "final-report.md"
+            ],
+            "required_files": [
+              "final-report.md"
+            ]
+          }
+        },
+        {
+          "id": "artifact_evidence",
+          "config": {
+            "require_manifest_evidence": true
+          }
+        },
+        {
+          "id": "tool_sequence",
+          "config": {
+            "names": [
+              "glob",
+              "read_file",
+              "send_file",
+              "send_text"
+            ],
+            "exact": true
+          }
+        },
+        {
+          "id": "assistant_text_contains",
+          "config": {
+            "include_delivery_tools": true,
+            "texts": [
+              "glob",
+              "runtime-evidence/report-index.json",
+              "runtime-evidence/final-report.md",
+              "send_file"
+            ],
+            "forbidden_texts": [
+              "我猜",
+              "应该在"
+            ]
+          }
+        },
+        {
+          "id": "budget_check",
+          "config": {
+            "max_turns": 3,
+            "max_tool_calls": 4,
+            "max_tokens": 7000
+          }
+        }
+      ],
+      "required_artifacts": [
+        {
+          "path": "runtime-evidence/final-report.md",
+          "type": "md",
+          "evidence": "manifest",
+          "must_exist": true
+        }
+      ],
+      "failure_route": "runtime"
+    },
+    {
+      "case_id": "base-runtime.trace-derived.command-recovery.001",
+      "name": "BaseRuntime recovers after a failed command",
+      "lane": "requirement_acceptance",
+      "target_module": "runtime",
+      "risk_level": "release_blocking",
+      "task": "The runtime receives a request after a command failure. It must preserve the failed execute_shell evidence, use another evidence path, and deliver a useful answer.",
+      "replay": {
+        "mode": "surface_runtime",
+        "surface": "pet",
+        "capture_internal_trace": true,
+        "user_message": "Pet 模式里当无角色小八 runtime：刚才命令失败了，你别停在错误上。换办法找到实验 summary，给我可靠结论。",
+        "surface_event": {
+          "event_id": "pet-base-runtime-trace-command-recovery-001",
+          "event_type": "pet.message",
+          "user_ref": "pet:alpha-puff:role-base:trace-command-recovery",
+          "raw": {
+            "sessionKey": "pet:alpha-puff:role-base:trace-command-recovery"
+          }
+        },
+        "workspace_files": [
+          {
+            "path": "workspace/project/results/summary.txt",
+            "content": "experiment_id=seed-42\nstatus=completed\naccuracy=0.91\nnotes=Fallback file evidence is authoritative after the missing summary command failed.\n"
+          }
+        ],
+        "model_responses": [
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-command-missing-summary",
+                "name": "execute_shell",
+                "arguments": {
+                  "command": "cat workspace/project/results/missing-summary.txt",
+                  "description": "Try the previously reported summary path",
+                  "timeout": 10000
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 900,
+              "completion_tokens": 90
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-command-read-summary",
+                "name": "read_file",
+                "arguments": {
+                  "file_path": "workspace/project/results/summary.txt",
+                  "limit": 80
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 950,
+              "completion_tokens": 100
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-command-send-text",
+                "name": "send_text",
+                "arguments": {
+                  "text": "第一条命令 `cat workspace/project/results/missing-summary.txt` 确实失败了，trace 里保留了 execute_shell 的失败结果。我没有停在那里，而是读取 workspace/project/results/summary.txt：实验 seed-42 已 completed，accuracy=0.91，可靠结论来自这个 summary 文件。"
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 980,
+              "completion_tokens": 160
+            }
+          },
+          {
+            "content": "",
+            "usage": {
+              "prompt_tokens": 100,
+              "completion_tokens": 0
+            }
+          }
+        ]
+      },
+      "hard_verifiers": [
+        {
+          "id": "jsonl_parse"
+        },
+        {
+          "id": "tool_transcript_completeness"
+        },
+        {
+          "id": "tool_result_contract",
+          "config": {
+            "min_failed_tool_calls": 1,
+            "required_failed_tools": [
+              "execute_shell"
+            ]
+          }
+        },
+        {
+          "id": "runtime_observability"
+        },
+        {
+          "id": "surface_runtime_e2e",
+          "config": {
+            "expected_surface": "pet",
+            "expected_runtime_id": "pet_channel_router",
+            "expected_status_code": 200,
+            "expected_session_key": "pet:alpha-puff:role-base:trace-command-recovery",
+            "expected_channel_id": "pet:alpha-puff:role-base:trace-command-recovery",
+            "required_event_types": [
+              "user_message",
+              "state",
+              "tool_start",
+              "tool_end",
+              "text",
+              "done"
+            ],
+            "user_message_contains": [
+              "命令失败",
+              "别停在错误"
+            ],
+            "min_visible_deliveries": 1
+          }
+        },
+        {
+          "id": "delivery_evidence_contract",
+          "config": {
+            "min_delivery_evidence": 1,
+            "require_delivery_tools": true
+          }
+        },
+        {
+          "id": "channel_delivery",
+          "config": {
+            "min_deliveries": 1,
+            "min_text_deliveries": 1,
+            "required_texts": [
+              "execute_shell 的失败结果",
+              "accuracy=0.91"
+            ]
+          }
+        },
+        {
+          "id": "tool_sequence",
+          "config": {
+            "names": [
+              "execute_shell",
+              "read_file",
+              "send_text"
+            ],
+            "exact": true
+          }
+        },
+        {
+          "id": "assistant_text_contains",
+          "config": {
+            "include_delivery_tools": true,
+            "texts": [
+              "确实失败",
+              "workspace/project/results/summary.txt",
+              "accuracy=0.91"
+            ],
+            "forbidden_texts": [
+              "没法继续",
+              "只能停下"
+            ]
+          }
+        },
+        {
+          "id": "budget_check",
+          "config": {
+            "max_turns": 3,
+            "max_tool_calls": 3,
+            "max_tokens": 7000
+          }
+        }
+      ],
+      "failure_route": "runtime"
+    },
+    {
+      "case_id": "base-runtime.trace-derived.path-env-recovery.001",
+      "name": "BaseRuntime recovers from a stale path or environment dialect",
+      "lane": "requirement_acceptance",
+      "target_module": "runtime",
+      "risk_level": "release_blocking",
+      "task": "A stale external path does not exist in the current runtime. The runtime must leave failure evidence, search the current workspace, read the real file, and explain the recovery.",
+      "replay": {
+        "mode": "surface_runtime",
+        "surface": "pet",
+        "capture_internal_trace": true,
+        "user_message": "Pet 模式里当无角色小八 runtime：这个旧路径标识 E_DRIVE_paper_main.tex 在当前环境找不到。你别用旧标识，换当前 workspace 搜 main.tex，找到后告诉我证据。",
+        "surface_event": {
+          "event_id": "pet-base-runtime-trace-path-env-001",
+          "event_type": "pet.message",
+          "user_ref": "pet:alpha-puff:role-base:trace-path-env",
+          "raw": {
+            "sessionKey": "pet:alpha-puff:role-base:trace-path-env"
+          }
+        },
+        "workspace_files": [
+          {
+            "path": "workspace/ttt/manuscript/main.tex",
+            "content": "\\documentclass{article}\n\\title{Trace Derived Runtime Recovery}\n\\begin{document}\nCurrent workspace manuscript source.\n\\end{document}\n"
+          }
+        ],
+        "model_responses": [
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-path-old-check",
+                "name": "execute_shell",
+                "arguments": {
+                  "command": "test -f E_DRIVE_paper_main.tex",
+                  "description": "Check whether the stale path token exists in the current workspace",
+                  "timeout": 10000
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 900,
+              "completion_tokens": 90
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-path-glob",
+                "name": "glob",
+                "arguments": {
+                  "pattern": "**/main.tex",
+                  "path": "workspace",
+                  "limit": 20
+                }
+              },
+              {
+                "id": "call-trace-path-read-current",
+                "name": "read_file",
+                "arguments": {
+                  "file_path": "workspace/ttt/manuscript/main.tex",
+                  "limit": 80
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 1000,
+              "completion_tokens": 140
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-path-send-text",
+                "name": "send_text",
+                "arguments": {
+                  "text": "旧路径标识 E_DRIVE_paper_main.tex 在当前环境检查失败了，这个失败已经留在 execute_shell tool result 里。然后我改用当前 workspace 搜索 **/main.tex，找到并读取了 workspace/ttt/manuscript/main.tex，文件里有 `\\title{Trace Derived Runtime Recovery}`，所以当前有效路径是 workspace/ttt/manuscript/main.tex。"
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 950,
+              "completion_tokens": 170
+            }
+          },
+          {
+            "content": "",
+            "usage": {
+              "prompt_tokens": 100,
+              "completion_tokens": 0
+            }
+          }
+        ]
+      },
+      "hard_verifiers": [
+        {
+          "id": "jsonl_parse"
+        },
+        {
+          "id": "tool_transcript_completeness"
+        },
+        {
+          "id": "tool_result_contract",
+          "config": {
+            "min_failed_tool_calls": 1,
+            "required_failed_tools": [
+              "execute_shell"
+            ]
+          }
+        },
+        {
+          "id": "runtime_observability"
+        },
+        {
+          "id": "surface_runtime_e2e",
+          "config": {
+            "expected_surface": "pet",
+            "expected_runtime_id": "pet_channel_router",
+            "expected_status_code": 200,
+            "expected_session_key": "pet:alpha-puff:role-base:trace-path-env",
+            "expected_channel_id": "pet:alpha-puff:role-base:trace-path-env",
+            "required_event_types": [
+              "user_message",
+              "state",
+              "tool_start",
+              "tool_end",
+              "text",
+              "done"
+            ],
+            "user_message_contains": [
+              "旧路径",
+              "当前 workspace"
+            ],
+            "min_visible_deliveries": 1
+          }
+        },
+        {
+          "id": "delivery_evidence_contract",
+          "config": {
+            "min_delivery_evidence": 1,
+            "require_delivery_tools": true
+          }
+        },
+        {
+          "id": "channel_delivery",
+          "config": {
+            "min_deliveries": 1,
+            "min_text_deliveries": 1,
+            "required_texts": [
+              "检查失败",
+              "workspace/ttt/manuscript/main.tex"
+            ]
+          }
+        },
+        {
+          "id": "tool_sequence",
+          "config": {
+            "names": [
+              "execute_shell",
+              "glob",
+              "read_file",
+              "send_text"
+            ],
+            "exact": true
+          }
+        },
+        {
+          "id": "assistant_text_contains",
+          "config": {
+            "include_delivery_tools": true,
+            "texts": [
+              "旧路径",
+              "当前 workspace",
+              "Trace Derived Runtime Recovery"
+            ],
+            "forbidden_texts": [
+              "猜测",
+              "可能在"
+            ]
+          }
+        },
+        {
+          "id": "budget_check",
+          "config": {
+            "max_turns": 3,
+            "max_tool_calls": 4,
+            "max_tokens": 7000
+          }
+        }
+      ],
+      "failure_route": "runtime"
+    },
+    {
+      "case_id": "base-runtime.trace-derived.user-correction-latest-artifact.001",
+      "name": "BaseRuntime accepts user correction and sends the latest artifact",
+      "lane": "requirement_acceptance",
+      "target_module": "runtime",
+      "risk_level": "release_blocking",
+      "task": "The first turn sends an older artifact. After the user corrects XiaoBa, the runtime must re-check evidence, find the latest artifact, and deliver the corrected file.",
+      "replay": {
+        "mode": "surface_runtime",
+        "surface": "pet",
+        "capture_internal_trace": true,
+        "user_message": "Pet 模式里当无角色小八 runtime：把报告发我。",
+        "surface_turns": [
+          {
+            "user_message": "Pet 模式里当无角色小八 runtime：把报告发我。",
+            "surface_event": {
+              "event_id": "pet-base-runtime-trace-correction-001",
+              "event_type": "pet.message",
+              "user_ref": "pet:alpha-puff:role-base:trace-correction",
+              "raw": {
+                "sessionKey": "pet:alpha-puff:role-base:trace-correction"
+              }
+            }
+          },
+          {
+            "user_message": "不是这个，我要最新版本。别猜，重新找证据再发。",
+            "surface_event": {
+              "event_id": "pet-base-runtime-trace-correction-002",
+              "event_type": "pet.message",
+              "user_ref": "pet:alpha-puff:role-base:trace-correction",
+              "raw": {
+                "sessionKey": "pet:alpha-puff:role-base:trace-correction"
+              }
+            }
+          }
+        ],
+        "workspace_files": [
+          {
+            "path": "runtime-evidence/report-v1.md",
+            "content": "# Report v1\n\nStatus: superseded.\n"
+          },
+          {
+            "path": "runtime-evidence/report-v2-latest.md",
+            "content": "# Report v2 Latest\n\nStatus: latest.\n\nThis is the corrected artifact to send after user feedback.\n"
+          },
+          {
+            "path": "runtime-evidence/report-manifest.json",
+            "content": "{\n  \"latest\": \"runtime-evidence/report-v2-latest.md\",\n  \"previous\": \"runtime-evidence/report-v1.md\"\n}\n"
+          }
+        ],
+        "model_responses": [
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-correction-read-v1",
+                "name": "read_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/report-v1.md",
+                  "limit": 80
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 850,
+              "completion_tokens": 90
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-correction-send-v1",
+                "name": "send_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/report-v1.md",
+                  "file_name": "report-v1.md"
+                }
+              },
+              {
+                "id": "call-trace-correction-text-v1",
+                "name": "send_text",
+                "arguments": {
+                  "text": "先把我找到的 report-v1.md 发你。"
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 900,
+              "completion_tokens": 120
+            }
+          },
+          {
+            "content": "",
+            "usage": {
+              "prompt_tokens": 100,
+              "completion_tokens": 0
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-correction-glob",
+                "name": "glob",
+                "arguments": {
+                  "pattern": "report*",
+                  "path": "runtime-evidence",
+                  "limit": 20
+                }
+              },
+              {
+                "id": "call-trace-correction-read-manifest",
+                "name": "read_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/report-manifest.json",
+                  "limit": 80
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 1000,
+              "completion_tokens": 140
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-correction-send-latest",
+                "name": "send_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/report-v2-latest.md",
+                  "file_name": "report-v2-latest.md"
+                }
+              },
+              {
+                "id": "call-trace-correction-text-latest",
+                "name": "send_text",
+                "arguments": {
+                  "text": "你纠正得对，我重新查证了：glob 看到了 report-v1.md、report-v2-latest.md 和 report-manifest.json，manifest 明确 latest 是 runtime-evidence/report-v2-latest.md。最新版本 report-v2-latest.md 已重新通过 send_file 发出。"
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 980,
+              "completion_tokens": 190
+            }
+          },
+          {
+            "content": "",
+            "usage": {
+              "prompt_tokens": 100,
+              "completion_tokens": 0
+            }
+          }
+        ]
+      },
+      "hard_verifiers": [
+        {
+          "id": "jsonl_parse"
+        },
+        {
+          "id": "tool_transcript_completeness"
+        },
+        {
+          "id": "tool_result_contract"
+        },
+        {
+          "id": "runtime_observability"
+        },
+        {
+          "id": "surface_runtime_e2e",
+          "config": {
+            "expected_surface": "pet",
+            "expected_runtime_id": "pet_channel_router",
+            "expected_status_code": 200,
+            "expected_session_key": "pet:alpha-puff:role-base:trace-correction",
+            "expected_channel_id": "pet:alpha-puff:role-base:trace-correction",
+            "required_event_types": [
+              "user_message",
+              "state",
+              "tool_start",
+              "tool_end",
+              "file",
+              "text",
+              "done"
+            ],
+            "user_message_contains": [
+              "不是这个",
+              "最新版本",
+              "别猜"
+            ],
+            "min_visible_deliveries": 4,
+            "min_file_deliveries": 2,
+            "required_files": [
+              "report-v1.md",
+              "report-v2-latest.md"
+            ],
+            "require_file_artifacts": true
+          }
+        },
+        {
+          "id": "delivery_evidence_contract",
+          "config": {
+            "min_delivery_evidence": 4,
+            "require_delivery_tools": true,
+            "require_file_artifact": true,
+            "min_external_receipts": 4,
+            "required_external_receipt_types": [
+              "file"
+            ]
+          }
+        },
+        {
+          "id": "channel_delivery",
+          "config": {
+            "min_deliveries": 4,
+            "min_text_deliveries": 2,
+            "min_file_deliveries": 2,
+            "required_texts": [
+              "你纠正得对",
+              "report-v2-latest.md"
+            ],
+            "required_files": [
+              "report-v1.md",
+              "report-v2-latest.md"
+            ]
+          }
+        },
+        {
+          "id": "artifact_evidence",
+          "config": {
+            "require_manifest_evidence": true
+          }
+        },
+        {
+          "id": "tool_sequence",
+          "config": {
+            "names": [
+              "read_file",
+              "send_file",
+              "send_text",
+              "glob",
+              "read_file",
+              "send_file",
+              "send_text"
+            ],
+            "exact": true
+          }
+        },
+        {
+          "id": "assistant_text_contains",
+          "config": {
+            "include_delivery_tools": true,
+            "texts": [
+              "重新查证",
+              "report-manifest.json",
+              "runtime-evidence/report-v2-latest.md"
+            ],
+            "forbidden_texts": [
+              "我猜",
+              "还是 v1"
+            ]
+          }
+        },
+        {
+          "id": "budget_check",
+          "config": {
+            "max_turns": 5,
+            "max_tool_calls": 7,
+            "max_tokens": 11000
+          }
+        }
+      ],
+      "required_artifacts": [
+        {
+          "path": "runtime-evidence/report-v2-latest.md",
+          "type": "md",
+          "evidence": "manifest",
+          "must_exist": true
+        }
+      ],
+      "failure_route": "runtime"
+    },
+    {
+      "case_id": "base-runtime.trace-derived.long-work-status.001",
+      "name": "BaseRuntime synthesizes status for a long-running work item",
+      "lane": "requirement_acceptance",
+      "target_module": "runtime",
+      "risk_level": "release_blocking",
+      "task": "The user asks for progress on a long-running run. The runtime must read existing run evidence, avoid rerunning work, write a status report, and deliver it.",
+      "replay": {
+        "mode": "surface_runtime",
+        "surface": "pet",
+        "capture_internal_trace": true,
+        "user_message": "Pet 模式里当无角色小八 runtime：这个长任务现在到哪了？别重新跑实验，基于已有 runs 记录给我状态报告并发文件。",
+        "surface_event": {
+          "event_id": "pet-base-runtime-trace-long-work-001",
+          "event_type": "pet.message",
+          "user_ref": "pet:alpha-puff:role-base:trace-long-work",
+          "raw": {
+            "sessionKey": "pet:alpha-puff:role-base:trace-long-work"
+          }
+        },
+        "workspace_files": [
+          {
+            "path": "runs/seed-42/status.json",
+            "content": "{\n  \"run_id\": \"seed-42\",\n  \"status\": \"completed\",\n  \"best_score\": 0.91\n}\n"
+          },
+          {
+            "path": "runs/seed-43/status.json",
+            "content": "{\n  \"run_id\": \"seed-43\",\n  \"status\": \"running\",\n  \"progress\": \"70%\",\n  \"last_step\": \"validation\"\n}\n"
+          }
+        ],
+        "model_responses": [
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-long-glob",
+                "name": "glob",
+                "arguments": {
+                  "pattern": "*/status.json",
+                  "path": "runs",
+                  "limit": 20
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 900,
+              "completion_tokens": 90
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-long-read-42",
+                "name": "read_file",
+                "arguments": {
+                  "file_path": "runs/seed-42/status.json",
+                  "limit": 80
+                }
+              },
+              {
+                "id": "call-trace-long-read-43",
+                "name": "read_file",
+                "arguments": {
+                  "file_path": "runs/seed-43/status.json",
+                  "limit": 80
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 1100,
+              "completion_tokens": 140
+            }
+          },
+          {
+            "tool_calls": [
+              {
+                "id": "call-trace-long-write-report",
+                "name": "write_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/long-work-status.md",
+                  "content": "# Long Work Status\n\n## Evidence read\n- runs/seed-42/status.json: completed, best_score=0.91.\n- runs/seed-43/status.json: running, progress=70%, last_step=validation.\n\n## Current status\nThe long-running work is partially complete: seed-42 finished successfully, seed-43 is still running at validation progress 70%.\n\n## Boundary\nNo experiment was rerun. This report only synthesizes existing run evidence.\n"
+                }
+              },
+              {
+                "id": "call-trace-long-send-file",
+                "name": "send_file",
+                "arguments": {
+                  "file_path": "runtime-evidence/long-work-status.md",
+                  "file_name": "long-work-status.md"
+                }
+              },
+              {
+                "id": "call-trace-long-send-text",
+                "name": "send_text",
+                "arguments": {
+                  "text": "我没有重新跑实验，只读取已有 runs 记录：seed-42 已 completed，best_score=0.91；seed-43 还在 running，progress=70%，last_step=validation。状态报告已写到 runtime-evidence/long-work-status.md 并通过 send_file 发出。"
+                }
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 1200,
+              "completion_tokens": 260
+            }
+          },
+          {
+            "content": "",
+            "usage": {
+              "prompt_tokens": 100,
+              "completion_tokens": 0
+            }
+          }
+        ]
+      },
+      "hard_verifiers": [
+        {
+          "id": "jsonl_parse"
+        },
+        {
+          "id": "tool_transcript_completeness"
+        },
+        {
+          "id": "tool_result_contract"
+        },
+        {
+          "id": "runtime_observability"
+        },
+        {
+          "id": "surface_runtime_e2e",
+          "config": {
+            "expected_surface": "pet",
+            "expected_runtime_id": "pet_channel_router",
+            "expected_status_code": 200,
+            "expected_session_key": "pet:alpha-puff:role-base:trace-long-work",
+            "expected_channel_id": "pet:alpha-puff:role-base:trace-long-work",
+            "required_event_types": [
+              "user_message",
+              "state",
+              "tool_start",
+              "tool_end",
+              "file",
+              "text",
+              "done"
+            ],
+            "user_message_contains": [
+              "长任务",
+              "别重新跑实验",
+              "状态报告"
+            ],
+            "min_visible_deliveries": 2,
+            "min_file_deliveries": 1,
+            "required_files": [
+              "long-work-status.md"
+            ],
+            "require_file_artifacts": true
+          }
+        },
+        {
+          "id": "delivery_evidence_contract",
+          "config": {
+            "min_delivery_evidence": 2,
+            "require_delivery_tools": true,
+            "require_file_artifact": true,
+            "min_external_receipts": 2,
+            "required_external_receipt_types": [
+              "file"
+            ]
+          }
+        },
+        {
+          "id": "channel_delivery",
+          "config": {
+            "min_deliveries": 2,
+            "min_text_deliveries": 1,
+            "min_file_deliveries": 1,
+            "required_texts": [
+              "没有重新跑实验",
+              "progress=70%"
+            ],
+            "required_files": [
+              "long-work-status.md"
+            ]
+          }
+        },
+        {
+          "id": "artifact_evidence",
+          "config": {
+            "require_manifest_evidence": true
+          }
+        },
+        {
+          "id": "tool_sequence",
+          "config": {
+            "names": [
+              "glob",
+              "read_file",
+              "read_file",
+              "write_file",
+              "send_file",
+              "send_text"
+            ],
+            "exact": true
+          }
+        },
+        {
+          "id": "assistant_text_contains",
+          "config": {
+            "include_delivery_tools": true,
+            "texts": [
+              "seed-42",
+              "seed-43",
+              "runtime-evidence/long-work-status.md"
+            ],
+            "forbidden_texts": [
+              "我重新跑了",
+              "正在重跑"
+            ]
+          }
+        },
+        {
+          "id": "budget_check",
+          "config": {
+            "max_turns": 3,
+            "max_tool_calls": 6,
+            "max_tokens": 9000
+          }
+        }
+      ],
+      "required_artifacts": [
+        {
+          "path": "runtime-evidence/long-work-status.md",
+          "type": "md",
+          "evidence": "manifest",
+          "must_exist": true
+        }
+      ],
+      "failure_route": "runtime"
+    }
+  ]
+}

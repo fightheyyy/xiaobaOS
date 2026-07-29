@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { RoleConfig } from '../types/role';
-import { parseCapabilityStatus } from '../types/capability-status';
 
 const DEFAULT_ROLE_NAMES = new Set(['', 'base', 'default', 'none']);
 
@@ -40,29 +39,18 @@ export class ActiveRoleContext {
     }
 
     try {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as RoleConfig;
-      return {
-        ...config,
-        status: parseCapabilityStatus(config.status, `role ${roleDirName}`),
+      const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as RoleConfig & {
+        status?: unknown;
       };
+      const { status: _obsoleteStatus, ...config } = raw;
+      return config;
     } catch (error: any) {
       throw new Error(`角色配置解析失败 (${configPath}): ${error.message}`);
     }
   }
 
-  /** Runtime discovery only exposes evaluated active roles. */
+  /** Runtime discovery exposes every installed Role package. */
   static listAvailableRoles(): string[] {
-    return this.listManagedRoles().filter(roleName => {
-      try {
-        return this.getRoleConfig(roleName)?.status === 'active';
-      } catch {
-        return false;
-      }
-    });
-  }
-
-  /** Management surfaces retain visibility of candidate and blocked role packages. */
-  static listManagedRoles(): string[] {
     const rolesRoot = this.getRolesRoot();
     if (!fs.existsSync(rolesRoot)) {
       return [];
@@ -74,52 +62,21 @@ export class ActiveRoleContext {
       .sort((a, b) => a.localeCompare(b));
   }
 
-  /**
-   * Runtime resolution permits active aliases and exact candidate package names.
-   * Candidate aliases are intentionally not discoverable; blocked roles never resolve.
-   */
+  /** Resolve an installed Role by directory name or alias. */
   static resolveRoleDirectoryName(roleName: string): string | undefined {
     const normalized = this.normalizeRoleName(roleName);
     if (DEFAULT_ROLE_NAMES.has(normalized)) {
       return undefined;
     }
 
-    const direct = this.listManagedRoles()
-      .find(candidate => this.normalizeRoleName(candidate) === normalized);
-    if (direct) {
-      try {
-        const status = this.getRoleConfig(direct)?.status || 'active';
-        return status === 'blocked' ? undefined : direct;
-      } catch {
-        return undefined;
-      }
-    }
-
-    return this.listAvailableRoles().find(candidate => this.roleAliases(candidate)
-      .some(alias => this.normalizeRoleName(alias) === normalized));
-  }
-
-  /** Management resolution is status-agnostic and may use aliases. */
-  static resolveManagedRoleDirectoryName(roleName: string): string | undefined {
-    const normalized = this.normalizeRoleName(roleName);
-    if (DEFAULT_ROLE_NAMES.has(normalized)) {
-      return undefined;
-    }
-
-    const direct = this.listManagedRoles()
+    const direct = this.listAvailableRoles()
       .find(candidate => this.normalizeRoleName(candidate) === normalized);
     if (direct) {
       return direct;
     }
 
-    return this.listManagedRoles().find(candidate => {
-      try {
-        return this.roleAliases(candidate)
-          .some(alias => this.normalizeRoleName(alias) === normalized);
-      } catch {
-        return false;
-      }
-    });
+    return this.listAvailableRoles().find(candidate => this.roleAliases(candidate)
+      .some(alias => this.normalizeRoleName(alias) === normalized));
   }
 
   static getActiveRoleName(): string | undefined {

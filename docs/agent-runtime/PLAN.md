@@ -1,7 +1,7 @@
 # Agent Runtime PLAN
 
 状态：Active
-最后更新：2026-07-22
+最后更新：2026-07-29
 Owner：Runtime maintainers
 
 ## Current Status
@@ -15,8 +15,10 @@ Owner：Runtime maintainers
 - EngineerCat is now a direct consumer of the shared loop with a narrow coding/Skill allowlist and child-side `ask_parent`; parent-side SubAgent controls and the nested coding-agent layer are absent.
 - EvolutionCat `remember` is a deterministic role tool over the existing session-person memory contract.
 - Terminal SubAgentSession runs persist standard child `traces.jsonl` with parent, role, selected-skill, tool-result and artifact lineage for nightly evolution and debugging.
-- A narrow, fixed `EvolutionDAGRunner` is the accepted scheduled control path; it awaits the shared SubAgentSession loop directly and never enters Base or creates a second agent loop.
+- `evolution sleep` uses the lightweight Evolution control workflow; the old typed-route runner is deleted.
 - Narrow SubAgent workflows can enforce `allowedWriteRoot` across file tools and macOS Seatbelt-confined Shell; unavailable native sandbox execution fails closed.
+- Case Replay defaults to an isolated child with a read-only ToolManager; workspace writes require an enforced clean runtime and never expose delivery / Browser / GUI / Secretary tools.
+- EngineerCat Source Candidate runs in a secret-free source copy；build and ordinary tests run under a native sandbox, while the two sandbox-in-sandbox contract files run separately with their own native sandbox；source + dist activation is scoped to the next process.
 - XiaoBa is a product runtime with a reusable harness core, not yet a public general-purpose Harness SDK.
 - Session/model/tool spans can be exported through the default-off OTLP/HTTP bridge; graceful runtime shutdown flushes spans while collector failure remains fail-open.
 
@@ -37,10 +39,12 @@ flowchart LR
 7. Provider/Shell end-to-end cancellation：partial。
 8. Public Harness SDK extraction：not a current product milestone。
 9. Standard `traces.jsonl` for terminal SubAgentSession runs：completed。
-10. Fixed Inspector-first evolution DAG runner：completed；it directly awaits shared SubAgentSession runs and never enters Base。
+10. Lightweight Evolution control：completed；old typed-route runner removed。
 11. Bounded SubAgent write root：completed for file tools and macOS Seatbelt Shell；other platforms fail closed when a bounded workflow requests Shell。
 12. Native EngineerCat runtime：completed；coding runs inside the shared SubAgentSession/ConversationRunner loop without an inner agent runtime。
 13. OTel trace bridge：completed for session/model/tool spans, W3C parent continuity, redacted OTLP/HTTP export and graceful flushing；metrics/logs export remains out of scope。
+14. Replay effect boundary：completed for default read-only and macOS clean-runtime workspace-write；other platforms fail closed。
+15. Source Candidate runtime boundary：completed for isolated EngineerCat, full Test and next-process source + dist activation。
 
 ## Next Steps
 
@@ -68,6 +72,8 @@ flowchart LR
 - EngineerCat coding tasks use the shared tool contract through an explicit allowlist; Base externally owns SubAgent lifecycle, EngineerCat may only use `ask_parent` as the child uplink, and it has no parent-side controls, second model loop or role-local job manager.
 - External drivers are fixed, bounded capability adapters with version, timeout and trust evidence.
 - A SubAgent with `allowedWriteRoot` cannot use file tools or Shell to write outside that root; workflows must hide any separate write control plane that can choose another cwd.
+- A default Case Replay cannot call write, Shell, delivery, Browser, GUI or Secretary tools; explicit write Cases require an enforced clean runtime.
+- A Source Candidate cannot read production source or write outside its candidate/test roots during Test; passing code activates only for the next process.
 - Runtime architecture changes update this PLAN and [`SPEC.md`](SPEC.md) only.
 - Enabling OTLP export does not change Agent outcomes or expose prompt, tool argument, file-content or free-form error attributes.
 
@@ -78,15 +84,16 @@ flowchart LR
 - Full provider/Shell cancellation is incomplete.
 - Tool processes that deliberately detach from the supervised worker group can still require tool-specific cancellation evidence.
 - Owner identity is not yet a first-class runtime authorization fact.
+- Native `workspace_write` Replay and Source Candidate Test currently fail closed outside macOS.
 
 ## Recent Verification
 
-- SubAgent boundary tests passed 5/5, including traversal, absolute-path and symlink rejection plus an actual Seatbelt attempt to write outside `allowedWriteRoot`; the complete repository passed 625/625 across 97 suites and `npm run build` passed.
+- SubAgent boundary tests include traversal, absolute-path and symlink rejection plus an actual Seatbelt attempt outside `allowedWriteRoot`; the cleanup result passed 556/556 tests across 100 suites and `npm run build`.
 - OTel runtime tests verify session/model/tool-compatible parent topology, incoming W3C ancestry, graceful flushing and fail-open collector errors without changing local span evidence.
 - EngineerCat native-runtime tests verify the exact coding/Skill/`ask_parent` allowlist, the absence of parent-side SubAgent controls and nested job/session/supervisor tools, shared-loop execution and preserved case artifact guidance.
 - Terminal child trace tests cover success, failure, stop, selected-skill, parent lineage and real tool/artifact results.
-- A real-provider nightly run produced a terminal InspectorCat child trace with parent `evolution:dag:1999-01-01`, returned typed `no_op`, created no Base trace and exited cleanly.
-- Evolution DAG focused tests cover direct role awaiting, strict contract validation, route-specific tool deny-lists, process supervision and terminal manifest persistence.
+- Lightweight Evolution tests cover deterministic Candidate packaging, shared Test/Eval control, fail-closed code Findings, atomic Role/Skill activation and rollback.
+- A real Source Candidate validation completed build, ordinary repository tests and the separate native-sandbox contract phase inside the candidate boundary; it passed without activating production source.
 - A real-provider Arena `base_skill` proof exposed and fixed Base aliases being resolved as missing Role packages; focused ToolManager/Arena tests now cover the Base tool set without a role package.
 - UserCat now hashes the overflow of long Arena run ids instead of truncating away scenario identity, so multi-case pressure keeps distinct native Pet sessions.
 - Isolated Arena Role profiles now reuse the production ToolManager with an explicit snapshot-derived role policy: registered tools, provider-visible tools, role-native adapters, allow/deny rules and surface delivery tools are computed rather than hard-coded, without mutating global role resolution state.

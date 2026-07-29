@@ -212,14 +212,10 @@ async function installGithubSkill(repo: string): Promise<void> {
     if (skillFiles.length === 0) {
       throw new Error('仓库中没有找到有效的 SKILL.md');
     }
-    const installedSkills = skillFiles.map(filePath => SkillParser.parse(filePath));
-    for (const skill of installedSkills) {
-      SkillParser.updateStatus(skill.filePath, 'candidate');
-    }
+    skillFiles.forEach(filePath => SkillParser.parse(filePath));
 
     Logger.success(`\n✓ Skill ${styles.highlight(repoName)} 安装成功！`);
     Logger.info(`安装位置: ${skillPath}`);
-    Logger.info('状态: candidate（可显式试用；Arena/人工验收后再 Promote 为 active）');
     Logger.info('\n使用 xiaoba skill list 查看已安装的 skills');
   } catch (error: any) {
     Logger.error(`安装失败: ${error.message}`);

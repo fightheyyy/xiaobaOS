@@ -579,7 +579,17 @@ function createSafeDriverConfigPath(): string {
   // Unix-domain sockets have a small path limit (103 bytes on macOS). The
   // platform temp directory can itself be very long, so atomically create the
   // private runtime under the short system /tmp path on Unix.
-  const tempRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+  const sourceTestRoot = process.env.XIAOBA_SOURCE_CANDIDATE_TEST === '1'
+    ? process.env.XIAOBA_SOURCE_TEST_TMP_ROOT
+    : undefined;
+  if (sourceTestRoot && !path.isAbsolute(sourceTestRoot)) {
+    throw new Error('XIAOBA_SOURCE_TEST_TMP_ROOT must be absolute');
+  }
+  const tempRoot = process.platform === 'win32'
+    ? os.tmpdir()
+    : sourceTestRoot
+      ? fs.realpathSync(sourceTestRoot)
+      : '/tmp';
   const directory = fs.mkdtempSync(path.join(tempRoot, 'xab-'));
   if (process.platform !== 'win32') fs.chmodSync(directory, 0o700);
   const configPath = path.join(directory, 'config.json');

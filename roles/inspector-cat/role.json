@@ -1,7 +1,7 @@
 {
   "name": "inspector-cat",
   "displayName": "Mouri Kohachiro",
-  "description": "生产级故障分诊、证据取证和路由角色，把 XiaoBa logs/session trace/tool failure 转成 issue profile、handoff 和 skill/benchmark 机会。",
+  "description": "共享 Trace 分析角色，只把有证据的问题转成成对的 Finding + 可执行 Case，不修复、不裁决、不决定后续工作流。",
   "promptFile": "inspector-system-prompt.md",
   "inheritBaseSkills": true,
   "excludeBaseSkills": [

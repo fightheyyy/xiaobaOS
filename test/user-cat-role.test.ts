@@ -48,53 +48,36 @@ describe('UserCat role', () => {
     assert.equal(config.promptFile, 'user-system-prompt.md');
     assert.equal(config.inheritBaseSkills, false);
     assert.equal(config.inheritBaseTools, false);
-    assert.deepEqual(config.baseToolAllowlist, ['read_file', 'grep', 'glob', 'skill']);
-    assert.equal(config.metadata.benchmarkAcceptance, 'forbidden');
+    assert.deepEqual(config.baseToolAllowlist, []);
+    assert.equal(config.metadata.toolPolicy, 'one-natural-user-turn-or-explicit-live-trace');
+    assert.match(config.metadata.promptProvenance, /langwatch\/scenario.*Apache-2\.0/);
 
     RoleResolver.activateRole('low info user');
     assert.equal(RoleResolver.getActiveRoleName(), 'user-cat');
     assert.equal(process.env.CURRENT_ROLE_DISPLAY_NAME, 'UserCat');
   });
 
-  test('prompt encodes low-information trace production and forbids judgement', async () => {
+  test('prompt keeps UserCat in narrow Scenario-style end-user role-play', async () => {
     const prompt = await PromptManager.buildSystemPrompt({ roleName: 'user-cat' });
 
-    assert.match(prompt, /realistic low-information user pressure role/);
-    assert.match(prompt, /Dumb Enough/);
-    assert.match(prompt, /role_intent_map/);
-    assert.match(prompt, /xiaoba-cli-product-test/);
-    assert.match(prompt, /Never:[\s\S]*judge target role pass\/fail/);
-    assert.match(prompt, /Do not use shell, write, edit, subagent/);
-    assert.match(prompt, /recommended_next_owner/);
+    assert.match(prompt, /pretending to be an ordinary end user/);
+    assert.match(prompt, /keep each message short and conversational/);
+    assert.match(prompt, /do not reveal every detail up front/);
+    assert.match(prompt, /Send one user message and stop/);
+    assert.match(prompt, /It never means that\s+evaluation evidence is sufficient/);
+    assert.match(prompt, /Never:[\s\S]*judge whether the Agent passed or failed/);
+    assert.doesNotMatch(prompt, /role_intent_map|scenario_plan|trace_quality_self_check/);
     assert.match(prompt, /当前角色：UserCat/);
   });
 
-  test('only role-local UserCat skills are loaded', async () => {
+  test('UserCat has no role-local planning Skills', async () => {
     const manager = new SkillManager('user-cat');
     await manager.loadSkills();
 
-    assert.deepEqual(manager.getAllSkills().map(skill => skill.metadata.name).sort(), [
-      'trace-simulation',
-      'xiaoba-cli-product-test',
-    ]);
-
-    const skill = manager.getSkill('trace-simulation');
-    assert.ok(skill);
-    assert.equal(skill.metadata.userInvocable, true);
-    assert.equal(skill.metadata.autoInvocable, true);
-    assert.match(skill.content, /UserCat creates candidate trace data/);
-    assert.match(skill.content, /InspectorCat diagnoses, groups, extracts Replay Cases, and routes/);
-    assert.match(skill.content, /ReviewerCat only executes a Replay Case after Inspector routing/);
-
-    const productTestSkill = manager.getSkill('xiaoba-cli-product-test');
-    assert.ok(productTestSkill);
-    assert.equal(productTestSkill.metadata.userInvocable, true);
-    assert.equal(productTestSkill.metadata.autoInvocable, true);
-    assert.match(productTestSkill.content, /XiaoBa-CLI product test candidate traces/);
-    assert.match(productTestSkill.content, /user_trace_run/);
+    assert.deepEqual(manager.getAllSkills(), []);
   });
 
-  test('role exposes only read/search/skill helpers plus UserCat trace runner', async () => {
+  test('role exposes only the explicit UserCat live-trace compatibility tool', async () => {
     const userTools = getRoleSpecificToolsForRole('user-cat');
     assert.deepEqual(userTools.map(tool => tool.definition.name), ['user_trace_run']);
     assert.equal(await startRoleRuntimeServices({ workingDirectory: process.cwd() }), null);
@@ -103,10 +86,10 @@ describe('UserCat role', () => {
     const toolNames = manager.getToolDefinitions().map(tool => tool.name).sort();
 
     assert.ok(toolNames.includes('user_trace_run'));
-    assert.ok(toolNames.includes('read_file'));
-    assert.ok(toolNames.includes('grep'));
-    assert.ok(toolNames.includes('glob'));
-    assert.ok(toolNames.includes('skill'));
+    assert.ok(!toolNames.includes('read_file'));
+    assert.ok(!toolNames.includes('grep'));
+    assert.ok(!toolNames.includes('glob'));
+    assert.ok(!toolNames.includes('skill'));
     assert.ok(!toolNames.includes('write_file'));
     assert.ok(!toolNames.includes('edit_file'));
     assert.ok(!toolNames.includes('execute_shell'));

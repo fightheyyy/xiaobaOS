@@ -1,5 +1,3 @@
-import { CapabilityStatus } from './capability-status';
-
 export type ToolVisibilityMode = 'all' | 'skill_scoped';
 
 export interface RoleToolVisibilityConfig {
@@ -27,6 +25,5 @@ export interface RoleConfig {
   toolVisibility?: RoleToolVisibilityConfig;
   skillToolsetAliases?: Record<string, string | string[]>;
   confirmedToolGate?: ConfirmedToolGateConfig;
-  status?: CapabilityStatus;
   metadata?: Record<string, unknown>;
 }

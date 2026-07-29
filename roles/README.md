@@ -21,20 +21,18 @@ XiaoBa 只有一个面向用户的 Base Main Agent。Role 是 Base 派遣的专�
 
 | Role | 责任 | 不负责 |
 | --- | --- | --- |
-| `user-cat` | 作为内部 evaluation actor 施加低信息用户压力并生产候选 trace | 判断通过、修代码、替代 nightly 真实 trace |
-| `inspector-cat` | 发现问题、整理证据并输出类型化 route | 实现修复、生成候选、最终验收 |
-| `evolution-cat` | 确定性长期记忆、Inspector finding 后的候选 Skill/Role 沉淀和显式发布 | 原始 trace 诊断、编写 runtime 代码、自评通过、跨角色调度 |
-| `reviewer-cat` | 正式回放、独立验收、`closed / next_run / blocked` | 主实现、同次回跳修复 |
+| `user-cat` | 像普通用户一样与 Subject 互动；缺省时生成 Scenario | Oracle、证据判断、修复、裁决 |
+| `inspector-cat` | 把 Trace 变成 0..n 有证据的 Finding + Case | 实现、路由、裁决 |
+| `evolution-cat` | 确定性长期记忆和 Role/Skill/Memory Candidate 生成 | 代码、Eval、自我激活、跨角色调度 |
+| `reviewer-cat` | 共享 Agentic Judge；依据 Case、Oracle 和 Trace 返回结构化 decision | Replay 执行、实现、后续动作 |
 
-内部四个 Role 按 workflow 场景启动，并不构成每次全部执行的线性链。nightly 从 InspectorCat 开始；UserCat 主要用于按需测试和 Arena 场景；EvolutionCat、ReviewerCat 按 route 参与；`repair` 可以调用功能型的 EngineerCat。
+内部四个 Role 按 workflow 场景启动，并不构成每次全部执行的线性链。
 
 稳定协作关系：
 
 ```text
-Session Traces -> InspectorCat -> evolution -> EvolutionCat -> Arena
-                              -> repair    -> EngineerCat -> ReviewerCat
-                              -> replay    -------------> ReviewerCat
-                              -> no_op     -> terminal
+Scenario -> UserCat <-> Subject -> Trace -> InspectorCat -> Finding + Case -> Eval
+Trace / Case -> EngineerCat or EvolutionCat -> Candidate -> Test + Eval -> new Sessions
 ```
 
 ## 使用
@@ -58,7 +56,7 @@ SecretaryCat 复用[官方 larksuite/cli](https://github.com/larksuite/cli)执�
 
 Base 派遣跨角色工作时使用 `role_name`，目标角色自行选择其可见 Skill。`base`、`default`、`none` 表示不激活角色。
 
-`xiaoba evolution sleep` 是夜间入口：runtime 从本地 terminal traces 生成一次 digest，InspectorCat 先诊断并输出类型化 route；`evolution` 交给 EvolutionCat 生成隔离 Candidate Skill/Role 并进入 Arena，`repair` 交给 EngineerCat 后由 ReviewerCat 回放，`replay` 直接交给 ReviewerCat，`no_op` 显式终止。Base 不参与这条定时链路。macOS 上的 `schedule install` 默认按本地时间 03:17 安装当前项目专属的幂等 crontab block；`status` / `remove` 用于检查和移除。
+`xiaoba evolution sleep` 与 schedule 已进入轻量 Evolution control，并复用 shared Test、shared Eval 和 next-Session activation。
 
 ## Role 包结构
 
@@ -70,7 +68,7 @@ roles/<role-name>/
 ```
 
 - `role.json`：名称、描述、prompt、skill/tool policy 和确认 gate。
-- 新建的非默认 Role 必须在 `role.json` 写 `"status": "candidate"`；通过 Arena/人工验收并显式 Promote 后才改为 `active`。缺省 `active` 只兼容旧资产。
+- 发行目录中的 Role package 都可被 Runtime 发现；Role Candidate 只存在于一次 Evolution run 的隔离目录。
 - `prompts/**`：运行时角色指令，不是用户文档。
 - `skills/**/SKILL.md`：角色工作方法，不拥有独立 Agent loop。
 - 原生角色工具位于 `src/roles/**`，必须经过共享 ToolManager。

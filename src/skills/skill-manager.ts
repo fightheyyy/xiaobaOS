@@ -98,29 +98,8 @@ export class SkillManager {
     }
   }
 
-  /**
-   * 根据名称显式获取可调用 skill。
-   * active 与 candidate 可通过精确名称或已知别名显式调用；blocked 永不返回。
-   */
+  /** 根据名称或别名获取已安装的 Skill。 */
   getSkill(name: string): Skill | undefined {
-    const skill = this.getManagedSkill(name);
-    return skill?.metadata.status === 'blocked' ? undefined : skill;
-  }
-
-  /**
-   * 获取所有可调用的 skills。candidate 保留在管理/显式调用面，blocked 不返回。
-   */
-  getAllSkills(): Skill[] {
-    return this.getAllManagedSkills().filter(skill => skill.metadata.status !== 'blocked');
-  }
-
-  /** 获取包含 blocked 在内的完整管理视图。 */
-  getAllManagedSkills(): Skill[] {
-    return Array.from(this.skills.values());
-  }
-
-  /** 管理入口按名称读取三态资产，不赋予 runtime 调用权限。 */
-  getManagedSkill(name: string): Skill | undefined {
     const normalizedName = this.normalizeSkillName(name);
     const direct = Array.from(this.skills.values())
       .find(skill => this.normalizeSkillName(skill.metadata.name) === normalizedName);
@@ -131,24 +110,23 @@ export class SkillManager {
     return canonicalName ? this.skills.get(canonicalName) : undefined;
   }
 
+  /** 获取全部已安装的 Skills。 */
+  getAllSkills(): Skill[] {
+    return Array.from(this.skills.values());
+  }
+
   /**
    * 获取用户可调用的 skills
    */
   getUserInvocableSkills(): Skill[] {
-    return this.getAllManagedSkills().filter(skill => (
-      this.isNormallyDiscoverable(skill)
-      && skill.metadata.userInvocable !== false
-    ));
+    return this.getAllSkills().filter(skill => skill.metadata.userInvocable !== false);
   }
 
   /**
    * 获取自动可调用的 skills
    */
   getAutoInvocableSkills(): Skill[] {
-    return this.getAllManagedSkills().filter(skill => (
-      this.isNormallyDiscoverable(skill)
-      && skill.metadata.autoInvocable !== false
-    ));
+    return this.getAllSkills().filter(skill => skill.metadata.autoInvocable !== false);
   }
 
   /**
@@ -186,13 +164,6 @@ export class SkillManager {
 
   private normalizeText(text: string): string {
     return text.trim().toLowerCase();
-  }
-
-  private isNormallyDiscoverable(skill: Skill): boolean {
-    if (skill.metadata.status === 'active') {
-      return true;
-    }
-    return skill.metadata.status === 'candidate' && process.env.XIAOBA_ARENA === '1';
   }
 
   private normalizeSkillName(name: string): string {

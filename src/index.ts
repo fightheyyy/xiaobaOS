@@ -7,6 +7,7 @@ import { configCommand } from './commands/config';
 import { registerSkillCommand } from './commands/skill';
 import { registerRoleCommand } from './commands/role';
 import { registerArenaCommand } from './commands/arena';
+import { registerEvalCommand } from './commands/eval';
 import { registerEvolutionCommand } from './commands/evolution';
 import { registerDoctorCommand } from './commands/doctor';
 import { feishuCommand } from './commands/feishu';
@@ -42,7 +43,9 @@ async function main() {
   program.hook('preAction', (_thisCommand, actionCommand) => {
     const isDoctor = actionCommand.name() === 'doctor';
     const isStrictDoctorJson = isDoctor && actionCommand.opts().json === true;
-    if (!isStrictDoctorJson) {
+    const isStrictArenaContractJson = actionCommand.name() === 'live-contract'
+      && actionCommand.opts().json === true;
+    if (!isStrictDoctorJson && !isStrictArenaContractJson) {
       Logger.brand();
     }
     if (isDoctor) return;
@@ -133,6 +136,9 @@ async function main() {
 
   // Arena 能力审判场命令
   registerArenaCommand(program);
+
+  // Agent 行为评测
+  registerEvalCommand(program);
 
   // EvolutionCat 夜间演化入口
   registerEvolutionCommand(program);

@@ -14,22 +14,17 @@ import { PathResolver } from '../utils/path-resolver';
 import {
   ArenaAllowedRuntime,
   ArenaCleanRuntimeIndex,
-  ArenaDecision,
   ArenaDefaultSandbox,
-  ArenaReplayAttempts,
   ArenaReviewMode,
-  ArenaRunIndex,
   ArenaSandboxPolicy,
   ArenaSubjectManifest,
   ArenaSubjectSource,
+  ArenaTargetProfile,
   ArenaTrustLevel,
-  CreateArenaRunInput,
   PrepareArenaRuntimeInput,
 } from './types';
 
 export const ARENA_REVIEW_MODES: ArenaReviewMode[] = ['base_skill', 'role_skill', 'role'];
-
-export const ARENA_DECISIONS: ArenaDecision[] = ['pass', 'unstable', 'reopened', 'blocked', 'unsafe'];
 
 export const DEFAULT_PACKAGED_BASE_SKILLS = [...DEFAULT_BUNDLED_BASE_SKILLS];
 
@@ -76,7 +71,7 @@ export interface BuildArenaTargetProfileInput {
 
 export function buildArenaTargetProfile(
   input: BuildArenaTargetProfileInput,
-): ArenaRunIndex['target_profile'] {
+): ArenaTargetProfile {
   const subjectSkillId = input.subject.subject.type === 'skill' ? input.subject.subject.name : undefined;
   const roleConfig = input.rolePath ? readRoleConfig(input.rolePath) : undefined;
   const configuredRoleId = stringValue(roleConfig?.name);
@@ -381,53 +376,6 @@ export class ArenaManager {
     return JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as ArenaSubjectManifest;
   }
 
-  createRunIndex(input: CreateArenaRunInput): ArenaRunIndex {
-    const subject = this.readSubjectManifest(input.subjectId);
-    this.validateModeAndSubject(input.reviewMode, subject, input.targetRoleId);
-    const runId = safeSegment(input.runId || this.createId(['run', input.reviewMode, subject.subject_id, this.now().toISOString()]));
-    const runDir = path.join(this.getRunsRoot(), runId);
-    ensureDir(runDir);
-    const surface = input.surface || DEFAULT_SURFACE;
-    const replayAttempts = normalizeReplayAttempts(input.replayAttempts);
-    validateDecisionEvidence(input.decision, input.reviewerRef, replayAttempts);
-    this.validateEvidenceRefs(input, replayAttempts);
-
-    const sandbox = this.buildSandboxPolicy(subject, input.sandbox);
-    const targetRole = this.resolveTargetRole(subject, input.reviewMode, input.targetRoleId);
-    const runIndex: ArenaRunIndex = {
-      version: 1,
-      run_id: runId,
-      review_mode: input.reviewMode,
-      subject_id: subject.subject_id,
-      subject_manifest_path: relativePath(this.projectRoot, this.resolveSubjectManifestPath(subject.subject_id)),
-      target_profile: buildArenaTargetProfile({
-        reviewMode: input.reviewMode,
-        subject,
-        targetRoleId: targetRole?.name,
-        surface,
-        rolePath: targetRole?.sourceDir,
-        workingDirectory: this.projectRoot,
-      }),
-      usercat_run_ref: {
-        ...input.usercatRunRef,
-        trace_refs: input.usercatRunRef.trace_refs || input.traceRefs,
-      },
-      trace_refs: [...input.traceRefs],
-      inspector_refs: [...(input.inspectorRefs || [])],
-      ...(input.reviewerRef && { reviewer_ref: input.reviewerRef }),
-      replay_attempts: replayAttempts,
-      sandbox,
-      decision: input.decision,
-      scorecard_summary: input.scorecardSummary || '',
-      promotion: input.promotion || {},
-      created_at: this.now().toISOString(),
-    };
-
-    validateRunIndex(runIndex);
-    writeJson(path.join(runDir, 'arena-run.json'), runIndex);
-    return runIndex;
-  }
-
   prepareCleanRuntime(input: PrepareArenaRuntimeInput): ArenaCleanRuntimeIndex {
     const subject = this.readSubjectManifest(input.subjectId);
     this.validateModeAndSubject(input.reviewMode, subject, input.targetRoleId);
@@ -456,6 +404,14 @@ export class ArenaManager {
       path.join(runRoot, 'debug'),
     ]);
     Object.values(roots).forEach(ensureDir);
+    // The sandboxed worker writes evaluator and provider-call evidence here.
+    // Create the directory before Seatbelt starts so the worker never needs
+    // permission to create a direct child of the run root.
+    const debugRoot = path.join(runRoot, 'debug');
+    ensureDir(debugRoot);
+    if (process.env.XIAOBA_ARENA_LIVE_MODE === 'barena') {
+      fs.writeFileSync(path.join(debugRoot, 'provider-calls.ndjson'), '', 'utf-8');
+    }
 
     const registryFiles = [
       path.join(roots.home_root, 'skill-registry.json'),
@@ -473,6 +429,11 @@ export class ArenaManager {
       ? this.copySubjectSkill(subject, roots.skills_root)
       : undefined;
     const targetRole = this.resolveTargetRole(subject, input.reviewMode, input.targetRoleId);
+    const copiedSupportRoles = copyArenaSupportRoles(
+      this.projectRoot,
+      roots.roles_root,
+      targetRole?.name,
+    );
     const copiedRole = targetRole ? this.copyTargetRole(targetRole, roots.roles_root) : undefined;
     const surface = input.surface || DEFAULT_SURFACE;
     const targetProfile = buildArenaTargetProfile({
@@ -553,6 +514,7 @@ export class ArenaManager {
       copied: {
         base_skills: copiedBaseSkills.copied,
         missing_base_skills: copiedBaseSkills.missing,
+        support_roles: copiedSupportRoles,
         ...(copiedSubjectSkill && { subject_skill: copiedSubjectSkill }),
         ...(copiedRole && { role: copiedRole }),
         ...(copiedWorkspaceSeed && { workspace_seed: copiedWorkspaceSeed }),
@@ -718,28 +680,6 @@ export class ArenaManager {
     };
   }
 
-  private validateEvidenceRefs(input: CreateArenaRunInput, replayAttempts: ArenaReplayAttempts): void {
-    assertLocalRefExists(this.projectRoot, input.usercatRunRef.package_path, 'usercat_run_ref.package_path');
-    for (const [index, traceRef] of input.traceRefs.entries()) {
-      assertLocalRefExists(this.projectRoot, traceRef, `trace_refs[${index}]`);
-    }
-    for (const [index, traceRef] of (input.usercatRunRef.trace_refs || []).entries()) {
-      assertLocalRefExists(this.projectRoot, traceRef, `usercat_run_ref.trace_refs[${index}]`);
-    }
-    for (const [index, inspectorRef] of (input.inspectorRefs || []).entries()) {
-      assertLocalRefExists(this.projectRoot, inspectorRef, `inspector_refs[${index}]`);
-    }
-    for (const [index, replayTraceRef] of replayAttempts.trace_refs.entries()) {
-      assertLocalRefExists(this.projectRoot, replayTraceRef, `replay_attempts.trace_refs[${index}]`);
-    }
-    for (const [index, sourceTraceRef] of (replayAttempts.source_trace_refs || []).entries()) {
-      assertLocalRefExists(this.projectRoot, sourceTraceRef, `replay_attempts.source_trace_refs[${index}]`);
-    }
-    if (input.reviewerRef) {
-      assertLocalRefExists(this.projectRoot, input.reviewerRef.scorecard_path, 'reviewer_ref.scorecard_path');
-      assertLocalRefExists(this.projectRoot, input.reviewerRef.report_path, 'reviewer_ref.report_path');
-    }
-  }
 }
 
 function resetRuntimeRoots(paths: string[]): void {
@@ -761,6 +701,23 @@ function copyBaseSkills(projectRoot: string, skillsRoot: string): { copied: stri
     copied.push(skillName);
   }
   return { copied, missing };
+}
+
+function copyArenaSupportRoles(
+  projectRoot: string,
+  rolesRoot: string,
+  targetRoleName?: string,
+): string[] {
+  const target = normalizeSkillIdentity(targetRoleName || '');
+  const copied: string[] = [];
+  for (const roleName of ['user-cat', 'inspector-cat', 'reviewer-cat']) {
+    if (normalizeSkillIdentity(roleName) === target) continue;
+    const sourceDir = path.join(projectRoot, 'roles', roleName);
+    if (!fs.existsSync(path.join(sourceDir, 'role.json'))) continue;
+    copyDirectory(sourceDir, path.join(rolesRoot, roleName));
+    copied.push(roleName);
+  }
+  return copied;
 }
 
 function copyWorkspaceSeed(projectRoot: string, seedPath: string, workspaceRoot: string): { source: string; file_count: number } {
@@ -960,11 +917,17 @@ function normalizeEnvNames(values: string[]): string[] {
 }
 
 function uniqueExistingPaths(values: string[]): string[] {
-  return Array.from(new Set(
-    values
-      .map(value => path.resolve(value))
-      .filter(value => fs.existsSync(value)),
-  ));
+  const paths = new Set<string>();
+  for (const value of values) {
+    const resolved = path.resolve(value);
+    if (!fs.existsSync(resolved)) continue;
+    paths.add(resolved);
+    // macOS exposes /var as a symlink to /private/var. Seatbelt evaluates the
+    // kernel-resolved path, so scratch roots need both spellings while still
+    // referring to the exact same filesystem subtree.
+    paths.add(fs.realpathSync.native(resolved));
+  }
+  return [...paths];
 }
 
 function seatbeltString(value: string): string {
@@ -1188,80 +1151,6 @@ function ensureImmutableSnapshot(from: string, to: string, expectedFingerprint: 
     fs.rmSync(to, { recursive: true, force: true });
     throw error;
   }
-}
-
-function normalizeReplayAttempts(value: Partial<ArenaReplayAttempts> | undefined): ArenaReplayAttempts {
-  const planned = nonNegativeInt(value?.planned, 0);
-  const passCount = nonNegativeInt(value?.pass_count, 0);
-  const failCount = nonNegativeInt(value?.fail_count, 0);
-  const blockedCount = nonNegativeInt(value?.blocked_count, 0);
-  const completed = nonNegativeInt(value?.completed, passCount + failCount + blockedCount);
-  return {
-    planned,
-    completed,
-    pass_count: passCount,
-    fail_count: failCount,
-    blocked_count: blockedCount,
-    trace_refs: [...(value?.trace_refs || [])],
-    ...(value?.case_ids && { case_ids: [...value.case_ids] }),
-    ...(value?.source_trace_refs && { source_trace_refs: [...value.source_trace_refs] }),
-  };
-}
-
-function validateDecisionEvidence(
-  decision: ArenaDecision,
-  reviewerRef: unknown,
-  attempts: ArenaReplayAttempts,
-): void {
-  if (!ARENA_DECISIONS.includes(decision)) {
-    throw new Error(`Unsupported Arena decision: ${decision}`);
-  }
-  if (!reviewerRef) {
-    throw new Error(`${decision} requires reviewer_ref`);
-  }
-  if (decision === 'pass') {
-    if (attempts.fail_count > 0 || attempts.blocked_count > 0) {
-      throw new Error('pass requires no failed or blocked replay attempts');
-    }
-    if (attempts.planned > 0 && attempts.completed <= 0) {
-      throw new Error('pass with planned replay attempts requires completed replay attempts');
-    }
-  }
-  if (decision === 'unstable' && !(attempts.completed > 0 && attempts.pass_count > 0)) {
-    throw new Error('unstable requires at least one completed passing replay attempt');
-  }
-  if (decision === 'reopened' && attempts.fail_count <= 0) {
-    throw new Error('reopened requires at least one failed replay attempt');
-  }
-}
-
-function validateRunIndex(runIndex: ArenaRunIndex): void {
-  if (!runIndex.usercat_run_ref.run_id || !runIndex.usercat_run_ref.package_path) {
-    throw new Error('usercat_run_ref.run_id and package_path are required');
-  }
-  if (runIndex.trace_refs.length === 0) {
-    throw new Error('trace_refs must include native runtime evidence');
-  }
-  if (runIndex.decision !== 'blocked' && runIndex.inspector_refs.length === 0) {
-    throw new Error(`${runIndex.decision} requires Inspector evidence refs`);
-  }
-}
-
-function assertLocalRefExists(projectRoot: string, ref: string, field: string): void {
-  const normalizedRef = String(ref || '').trim();
-  if (!normalizedRef) {
-    throw new Error(`${field} is required`);
-  }
-  const filePart = normalizedRef.split('#')[0];
-  const absolutePath = path.resolve(projectRoot, filePart);
-  if (!fs.existsSync(absolutePath)) {
-    throw new Error(`${field} does not exist: ${normalizedRef}`);
-  }
-}
-
-function nonNegativeInt(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function writeJson(filePath: string, value: unknown): void {

@@ -8,9 +8,9 @@ Base 默认不再常驻任何 Skill。项目根目录 `skills/` 只用于用户�
 
 如果使用角色模式（例如 `xiaoba --role inspector-cat`），运行时加载该角色的 role-local Skills，并按 `role.json` 决定是否加载用户显式安装的独立 Skills。
 
-Skill / Role 只使用一个 `status` 字段：`active` 正常发现和调用；`candidate` 仅允许精确显式调用或 Arena 挂载；`blocked` 不可调用。旧资产未写 `status` 时等价于 `active`。
+发行目录里能被解析的 Skill package 就是当前可用 Skill。Runtime 不维护 `candidate / active / blocked` 状态，也不读取旧 `status` frontmatter；需要停用时直接卸载 package。
 
-Dashboard 的迁移顺序固定为 `blocked → candidate → active`：解除阻塞只回到 Candidate，晋升必须使用独立的 Promote 动作；试用 Candidate 不会自动改变状态。EvolutionCat 的发布 workflow 只发布 `active` 资产，Candidate 应先经过 Arena/人工验收并显式晋升。
+Evolution Candidate 只存在于一次 run 的隔离 `output/evolution/**/candidates/` 目录，通过 shared Test + Eval 后才原子替换发行目录中的 package。Dashboard 只展示、安装和删除当前 package，不负责晋升。
 
 ## 目录结构
 
@@ -44,9 +44,7 @@ xiaoba skill install-github owner/repo
 xiaoba skill install-github obra/superpowers
 ```
 
-从 GitHub 或 Dashboard 新安装的外部 Skill 一律写为 `candidate`，不会因安装完成而直接进入默认可调用集合；需经 Arena/人工验收并显式 Promote 后才成为 `active`。
-
-Skill 会被克隆到 `skills/` 目录，属于用户显式安装资产，不会因此变成默认 Base Skill。非默认 Skill 默认不进入 Git 跟踪。
+Skill 会被克隆到 `skills/` 目录并立即作为用户显式安装资产可用；它不会因此变成默认发行的 Base Skill。非默认 Skill 默认不进入 Git 跟踪。
 
 ### 查看 Skill 详情
 
@@ -82,7 +80,6 @@ skills/
 name: my-custom-skill
 description: 我的自定义 Skill
 invocable: user
-status: candidate
 ---
 
 # Skill 内容
@@ -96,7 +93,6 @@ status: candidate
 - ✅ Base 默认 Skill 数量为 0
 - ✅ 每个 Skill 一个独立文件夹
 - ✅ 必须包含 `SKILL.md` 文件
-- ✅ 新建 Skill 必须显式写 `status: candidate`；缺省为 `active` 只用于兼容旧资产
 - ✅ 支持从 GitHub 直接安装
 - ❌ 不再支持多级目录（npm、用户级、项目级等复杂结构）
 

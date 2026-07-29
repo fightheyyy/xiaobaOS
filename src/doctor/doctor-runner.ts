@@ -41,10 +41,9 @@ export interface DoctorRunnerDependencies {
   environment?: NodeJS.ProcessEnv;
   getProjectRoot?: () => string;
   getRolesRoot?: () => string;
-  listManagedRoles?: () => string[];
+  listRoles?: () => string[];
   getRoleConfig?: (roleName: string) => RoleConfig | undefined;
-  resolveManagedRole?: (roleName: string) => string | undefined;
-  resolveRuntimeRole?: (roleName: string) => string | undefined;
+  resolveRole?: (roleName: string) => string | undefined;
   getConfig?: () => ChatConfig;
   browserStatus?: (cwd: string) => Promise<AgentBrowserDriverStatus>;
   guiStatus?: () => Promise<PeekabooDriverStatus>;
@@ -67,11 +66,9 @@ export async function runDoctor(
   const arch = dependencies.arch || process.arch;
   const getProjectRoot = dependencies.getProjectRoot || (() => RoleResolver.getProjectRoot());
   const getRolesRoot = dependencies.getRolesRoot || (() => RoleResolver.getRolesRoot());
-  const listManagedRoles = dependencies.listManagedRoles || (() => RoleResolver.listManagedRoles());
+  const listRoles = dependencies.listRoles || (() => RoleResolver.listAvailableRoles());
   const getRoleConfig = dependencies.getRoleConfig || ((roleName: string) => RoleResolver.getRoleConfig(roleName));
-  const resolveManagedRole = dependencies.resolveManagedRole
-    || ((roleName: string) => RoleResolver.resolveManagedRoleDirectoryName(roleName));
-  const resolveRuntimeRole = dependencies.resolveRuntimeRole
+  const resolveRole = dependencies.resolveRole
     || ((roleName: string) => RoleResolver.resolveRoleDirectoryName(roleName));
   const getConfig = dependencies.getConfig || (() => ConfigManager.peekConfig());
   const pathExists = dependencies.pathExists || fs.existsSync;
@@ -106,10 +103,9 @@ export async function runDoctor(
   const roleInspection = inspectRoles({
     requestedRole,
     rolesRoot,
-    listManagedRoles,
+    listRoles,
     getRoleConfig,
-    resolveManagedRole,
-    resolveRuntimeRole,
+    resolveRole,
     pathExists,
   });
   checks.push(...roleInspection.checks);
@@ -263,16 +259,15 @@ function providerCheck(config: ChatConfig): ReadinessCheck {
 function inspectRoles(input: {
   requestedRole: string;
   rolesRoot: string;
-  listManagedRoles: () => string[];
+  listRoles: () => string[];
   getRoleConfig: (roleName: string) => RoleConfig | undefined;
-  resolveManagedRole: (roleName: string) => string | undefined;
-  resolveRuntimeRole: (roleName: string) => string | undefined;
+  resolveRole: (roleName: string) => string | undefined;
   pathExists: (targetPath: string) => boolean;
 }): { activeRole: string | null; checks: ReadinessCheck[] } {
   const checks: ReadinessCheck[] = [];
   let roleNames: string[] = [];
   try {
-    roleNames = input.listManagedRoles();
+    roleNames = input.listRoles();
   } catch {
     checks.push({
       id: 'roles.inventory',
@@ -280,7 +275,7 @@ function inspectRoles(input: {
       label: 'Role inventory',
       status: 'fail',
       required: true,
-      summary: 'Managed roles could not be enumerated.',
+      summary: 'Installed roles could not be enumerated.',
       nextAction: 'Check roles root contents and role.json permissions.',
     });
     return { activeRole: null, checks };
@@ -299,8 +294,8 @@ function inspectRoles(input: {
       data: { role: 'base' },
     });
   } else {
-    const managedRole = safeResolveRole(input.resolveManagedRole, input.requestedRole);
-    if (!managedRole) {
+    const resolvedRole = safeResolveRole(input.resolveRole, input.requestedRole);
+    if (!resolvedRole) {
       checks.push({
         id: 'roles.active',
         category: 'roles',
@@ -313,45 +308,19 @@ function inspectRoles(input: {
       });
     } else {
       try {
-        const config = input.getRoleConfig(managedRole);
-        const status = config?.status || 'active';
-        const runtimeRole = safeResolveRole(input.resolveRuntimeRole, input.requestedRole);
-        if (status === 'blocked') {
-          checks.push({
-            id: 'roles.active',
-            category: 'roles',
-            label: 'Active role',
-            status: 'blocked',
-            required: true,
-            summary: `${managedRole} is blocked and cannot enter the runtime.`,
-            nextAction: 'Resolve the role issue and move it back to candidate before trying it again.',
-            data: { role: managedRole, lifecycle: status },
-          });
-        } else if (!runtimeRole) {
-          checks.push({
-            id: 'roles.active',
-            category: 'roles',
-            label: 'Active role',
-            status: 'fail',
-            required: true,
-            summary: `${input.requestedRole} does not resolve to a runnable role.`,
-            nextAction: `Use the exact role directory name: ${managedRole}.`,
-            data: { role: managedRole, lifecycle: status },
-          });
-        } else {
-          activeRole = runtimeRole;
-          checks.push({
-            id: 'roles.active',
-            category: 'roles',
-            label: 'Active role',
-            status: status === 'candidate' ? 'warn' : 'pass',
-            required: true,
-            summary: status === 'candidate'
-              ? `${managedRole} is an explicitly selected candidate role.`
-              : `${managedRole} is active and runnable.`,
-            data: { role: managedRole, lifecycle: status },
-          });
+        if (!input.getRoleConfig(resolvedRole)) {
+          throw new Error('role.json is missing');
         }
+        activeRole = resolvedRole;
+        checks.push({
+          id: 'roles.active',
+          category: 'roles',
+          label: 'Active role',
+          status: 'pass',
+          required: true,
+          summary: `${resolvedRole} is installed and runnable.`,
+          data: { role: resolvedRole },
+        });
       } catch {
         checks.push({
           id: 'roles.active',
@@ -359,9 +328,9 @@ function inspectRoles(input: {
           label: 'Active role',
           status: 'fail',
           required: true,
-          summary: `${managedRole} has an invalid role.json.`,
-          nextAction: `Repair ${path.join(input.rolesRoot, managedRole, 'role.json')} and rerun xiaoba doctor.`,
-          data: { role: managedRole },
+          summary: `${resolvedRole} has an invalid role.json.`,
+          nextAction: `Repair ${path.join(input.rolesRoot, resolvedRole, 'role.json')} and rerun xiaoba doctor.`,
+          data: { role: resolvedRole },
         });
       }
     }
@@ -375,7 +344,6 @@ function inspectRoles(input: {
         checks.push(rolePackageFailure(roleName, required, 'role.json is missing.'));
         continue;
       }
-      const lifecycle = config.status || 'active';
       const promptFile = String(config.promptFile || '').trim();
       const promptReady = Boolean(promptFile && input.pathExists(path.join(input.rolesRoot, roleName, 'prompts', promptFile)));
       if (!promptReady) {
@@ -386,10 +354,10 @@ function inspectRoles(input: {
         id: `roles.package.${roleName}`,
         category: 'roles',
         label: config.displayName || roleName,
-        status: lifecycle === 'active' ? 'pass' : 'warn',
+        status: 'pass',
         required,
-        summary: `${roleName} package is valid with lifecycle ${lifecycle}.`,
-        data: { role: roleName, lifecycle, promptConfigured: true },
+        summary: `${roleName} package is valid and installed.`,
+        data: { role: roleName, promptConfigured: true },
       });
     } catch {
       checks.push(rolePackageFailure(roleName, required, 'role.json could not be parsed.'));

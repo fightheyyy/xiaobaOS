@@ -117,17 +117,15 @@ describe('Dashboard pet page wiring', () => {
     assert.ok(renderedNameFragments.length >= 2);
   });
 
-  test('capability cards separate unblock, candidate trial, and explicit promotion actions', () => {
+  test('capability cards expose package selection or deletion without lifecycle actions', () => {
     const index = fs.readFileSync(path.join(process.cwd(), 'desktop', 'dashboard', 'index.html'), 'utf-8');
 
-    assert.match(index, /unblockToCandidate: '解除阻塞 → Candidate'/);
-    assert.match(index, /promoteToActive: '明确晋升 → Active'/);
-    assert.match(index, /changeSkillLifecycle\([^\n]*unblock/);
-    assert.match(index, /changeSkillLifecycle\([^\n]*promote/);
-    assert.match(index, /changeRoleLifecycle\([^\n]*unblock/);
-    assert.match(index, /changeRoleLifecycle\([^\n]*promote/);
-    assert.match(index, /status === 'candidate' \? t\('tryCandidate'\) : t\('selectRole'\)/);
-    assert.doesNotMatch(index, /const action = blocked \? 'enable' : 'disable'/);
+    assert.match(index, /onclick="activateRole/);
+    assert.match(index, /onclick="deleteRole/);
+    assert.match(index, /onclick="deleteSkill/);
+    assert.doesNotMatch(index, /changeSkillLifecycle/);
+    assert.doesNotMatch(index, /changeRoleLifecycle/);
+    assert.doesNotMatch(index, /unblockToCandidate|promoteToActive|tryCandidate|blockCapability/);
   });
 
   test('config page does not expose legacy Inspector settings', () => {

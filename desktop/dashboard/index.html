@@ -928,13 +928,6 @@
       border-color: var(--border-strong);
     }
 
-    .skill-card.disabled {
-      opacity: 0.62;
-      border-style: dashed;
-    }
-
-    .skill-card.disabled:hover { border-color: var(--border); }
-
     .skill-header {
       display: flex;
       align-items: flex-start;
@@ -1004,11 +997,6 @@
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-
-    .skill-card.disabled .skill-emoji {
-      background: rgba(103, 112, 133, 0.08);
-      color: var(--text2);
     }
 
     .skill-title-block { flex: 1; min-width: 0; }
@@ -3830,20 +3818,9 @@
         unnamedSkill: 'Unnamed skill',
         noItemsPrefix: 'No ',
         tagRole: 'Role',
-        tagDisabled: 'Disabled',
         tagUserInvocable: 'User-invocable',
         tagAutoInvocable: 'Auto-invocable',
-        enable: 'Enable',
-        disable: 'Disable',
         selectRole: 'Select role',
-        tryCandidate: 'Try candidate',
-        blockCapability: 'Block',
-        unblockToCandidate: 'Unblock → Candidate',
-        promoteToActive: 'Promote → Active',
-        promoteSkillConfirmPrefix: 'Promote skill "',
-        promoteSkillConfirmSuffix: '" from Candidate to Active?',
-        promoteRoleConfirmPrefix: 'Promote role "',
-        promoteRoleConfirmSuffix: '" from Candidate to Active?',
         delete: 'Delete',
         noRoles: 'No roles',
         tagCurrent: 'Current',
@@ -3853,7 +3830,6 @@
         enabled: 'Selected',
         switchRoleFailed: 'Role switch failed: ',
         roleSwitchedRestart: 'Role switched. Running services need a restart to use the new role.',
-        roleLifecycleRestart: 'Role lifecycle changed. Running services need a restart to apply it.',
         operationFailed: 'Operation failed: ',
         logsTitleSuffix: ' logs',
         loading: 'Loading...',
@@ -3995,20 +3971,9 @@
         unnamedSkill: '未命名 skill',
         noItemsPrefix: '暂无 ',
         tagRole: '角色',
-        tagDisabled: '已禁用',
         tagUserInvocable: '用户调用',
         tagAutoInvocable: '自动调用',
-        enable: '启用',
-        disable: '禁用',
         selectRole: '选择角色',
-        tryCandidate: '试用候选角色',
-        blockCapability: '阻塞',
-        unblockToCandidate: '解除阻塞 → Candidate',
-        promoteToActive: '明确晋升 → Active',
-        promoteSkillConfirmPrefix: '确定将 Skill "',
-        promoteSkillConfirmSuffix: '" 从 Candidate 晋升为 Active 吗？',
-        promoteRoleConfirmPrefix: '确定将 Role "',
-        promoteRoleConfirmSuffix: '" 从 Candidate 晋升为 Active 吗？',
         delete: '删除',
         noRoles: '暂无角色',
         tagCurrent: '当前',
@@ -4018,7 +3983,6 @@
         enabled: '当前选中',
         switchRoleFailed: '切换失败: ',
         roleSwitchedRestart: '角色已切换。正在运行的服务需要重启后才会使用新角色。',
-        roleLifecycleRestart: '角色生命周期已变更。正在运行的服务需要重启后才会应用。',
         operationFailed: '操作失败: ',
         logsTitleSuffix: ' - 日志',
         loading: '加载中...',
@@ -4844,7 +4808,7 @@
       if (skillPath) {
         const parts = skillPath.split(/[\\/]/).filter(Boolean);
         const fileName = parts[parts.length - 1] || '';
-        if (/^skill\.md(?:\.disabled)?$/i.test(fileName) && parts.length >= 2) {
+        if (/^skill\.md$/i.test(fileName) && parts.length >= 2) {
           return parts[parts.length - 2];
         }
       }
@@ -4884,26 +4848,17 @@
     }
 
     function renderSkillCard(sk) {
-      const status = sk.status || (sk.enabled === false ? 'blocked' : 'active');
-      const blocked = status === 'blocked';
       const displayName = getSkillDisplayName(sk);
       const actionName = getSkillActionName(sk, displayName);
       const skillNameArg = escapeHtml(escapeJs(actionName));
       const roleTag = sk.roleOwned ? '<span class="tag warm">'+t('tagRole')+'</span>' : '<span class="tag gray">Runtime</span>';
-      const statusClass = status === 'active' ? 'green' : (status === 'candidate' ? 'warm' : 'red');
-      const statusTag = '<span class="tag '+statusClass+'">'+escapeHtml(status)+'</span>';
-      const lifecycleActions = status === 'blocked'
-        ? '<button class="btn btn-primary" onclick="changeSkillLifecycle(\''+skillNameArg+'\',\'unblock\')">'+t('unblockToCandidate')+'</button>'
-        : status === 'candidate'
-          ? '<button class="btn btn-primary" onclick="changeSkillLifecycle(\''+skillNameArg+'\',\'promote\')">'+t('promoteToActive')+'</button><button class="btn" onclick="changeSkillLifecycle(\''+skillNameArg+'\',\'disable\')">'+t('blockCapability')+'</button>'
-          : '<button class="btn" onclick="changeSkillLifecycle(\''+skillNameArg+'\',\'disable\')">'+t('blockCapability')+'</button>';
-      return '<div class="skill-card'+(blocked?' disabled':'')+'">'+
-        '<div class="skill-name" title="'+escapeHtml(displayName)+'">'+escapeHtml(displayName)+' '+statusTag+'</div>'+
+      return '<div class="skill-card">'+
+        '<div class="skill-name" title="'+escapeHtml(displayName)+'">'+escapeHtml(displayName)+'</div>'+
         '<div class="skill-desc">'+escapeHtml(sk.description||'')+'</div>'+
         '<div class="skill-tags">'+roleTag+(sk.userInvocable?'<span class="tag green">'+t('tagUserInvocable')+'</span>':'')+(sk.autoInvocable?'<span class="tag purple">'+t('tagAutoInvocable')+'</span>':'')+(sk.maxTurns?'<span class="tag gray">max '+sk.maxTurns+' turns</span>':'')+'</div>'+
         (sk.aliases&&sk.aliases.length?'<div class="skill-files">Aliases: '+sk.aliases.map(escapeHtml).join(', ')+'</div>':'')+
         (sk.files?'<div class="skill-files">'+sk.files.map(escapeHtml).join(', ')+'</div>':'')+
-        '<div class="skill-actions">'+lifecycleActions+'<button class="btn btn-danger" onclick="deleteSkill(\''+skillNameArg+'\')">'+t('delete')+'</button></div>'+
+        '<div class="skill-actions"><button class="btn btn-danger" onclick="deleteSkill(\''+skillNameArg+'\')">'+t('delete')+'</button></div>'+
       '</div>';
     }
 
@@ -4931,27 +4886,15 @@
       g.innerHTML = roles.map(role => {
         const roleSkills = role.roleSkills || [];
         const roleNameArg = escapeHtml(escapeJs(role.name || ''));
-        const status = role.status || 'active';
-        const statusClass = status === 'active' ? 'green' : (status === 'candidate' ? 'warm' : 'red');
         const tags = [
           role.active ? '<span class="tag green">'+t('tagCurrent')+'</span>' : '',
-          '<span class="tag '+statusClass+'">'+escapeHtml(status)+'</span>',
           role.inheritBaseSkills === false ? '<span class="tag gray">'+t('tagIndependentSkills')+'</span>' : '<span class="tag purple">'+t('tagInheritBase')+'</span>',
           role.roleSkillCount ? '<span class="tag warm">'+role.roleSkillCount+' role skills</span>' : '',
         ].join('');
         const skillPreview = roleSkills.slice(0, 5).map(s => '<span class="tag gray">'+escapeHtml(s.name)+'</span>').join('');
-        const selectionAction = status === 'blocked'
-          ? ''
-          : role.active
-            ? '<button class="btn" disabled>'+t('enabled')+'</button>'
-            : '<button class="btn" onclick="activateRole(\''+roleNameArg+'\')">'+(status === 'candidate' ? t('tryCandidate') : t('selectRole'))+'</button>';
-        const lifecycleActions = !role.removable
-          ? ''
-          : status === 'blocked'
-            ? '<button class="btn btn-primary" onclick="changeRoleLifecycle(\''+roleNameArg+'\',\'unblock\')">'+t('unblockToCandidate')+'</button>'
-            : status === 'candidate'
-              ? '<button class="btn btn-primary" onclick="changeRoleLifecycle(\''+roleNameArg+'\',\'promote\')">'+t('promoteToActive')+'</button><button class="btn" onclick="changeRoleLifecycle(\''+roleNameArg+'\',\'block\')">'+t('blockCapability')+'</button>'
-              : '<button class="btn" onclick="changeRoleLifecycle(\''+roleNameArg+'\',\'block\')">'+t('blockCapability')+'</button>';
+        const selectionAction = role.active
+          ? '<button class="btn" disabled>'+t('enabled')+'</button>'
+          : '<button class="btn" onclick="activateRole(\''+roleNameArg+'\')">'+t('selectRole')+'</button>';
         return '<div class="skill-card role-card'+(role.active?' active':'')+'">'+
           '<div class="skill-header">'+renderRoleAvatar(role, 'lg')+'<div class="skill-title-block"><div class="skill-name">'+escapeHtml(role.displayName || role.name)+'</div><div class="skill-files">'+escapeHtml(role.name)+'</div></div></div>'+
           '<div class="skill-desc">'+escapeHtml(role.description || t('defaultRoleDesc'))+'</div>'+
@@ -4959,7 +4902,7 @@
           (skillPreview ? '<div class="skill-tags">'+skillPreview+'</div>' : '')+
           (role.aliases&&role.aliases.length?'<div class="skill-files">Aliases: '+role.aliases.map(escapeHtml).join(', ')+'</div>':'')+
           '<div class="skill-actions">'+
-            selectionAction+lifecycleActions+
+            selectionAction+
             (role.removable?'<button class="btn btn-danger" onclick="deleteRole(\''+roleNameArg+'\')">'+t('delete')+'</button>':'')+
           '</div>'+
         '</div>';
@@ -4980,22 +4923,6 @@
         await fetchPets({ preferDefault: true });
       } catch (e) {
         alert(t('switchRoleFailed')+e.message);
-      }
-    }
-
-    async function changeRoleLifecycle(roleName, action) {
-      if(action==='promote'&&!confirm(t('promoteRoleConfirmPrefix')+roleName+t('promoteRoleConfirmSuffix')))return;
-      try {
-        const res = await fetch(API+'/api/roles/'+encodeURIComponent(roleName)+'/'+action, { method:'POST' });
-        const data = await res.json().catch(()=>({}));
-        if(!res.ok||data.error){alert(t('operationFailed')+(data.error||res.status));return;}
-        if(data.requiresRestart){alert(t('roleLifecycleRestart'));}
-        await fetchRoles();
-        await fetchStatus();
-        await fetchSkills();
-        await fetchPets({ preferDefault: true });
-      } catch(e) {
-        alert(t('operationFailed')+e.message);
       }
     }
 
@@ -5024,15 +4951,6 @@
       try{const r=await fetch(API+'/api/services/'+n+'/logs?lines=200');const logs=await r.json();document.getElementById('logs-body').textContent=logs.length?logs.join('\n'):t('noLogsYet');}catch(e){document.getElementById('logs-body').textContent=t('loadFailed');}
     }
     function closeLogs(){document.getElementById('logs-modal').classList.remove('show');}
-    async function changeSkillLifecycle(n,action){
-      if(action==='promote'&&!confirm(t('promoteSkillConfirmPrefix')+n+t('promoteSkillConfirmSuffix')))return;
-      try{
-        const res=await fetch(API+'/api/skills/'+encodeURIComponent(n)+'/'+action,{method:'POST'});
-        const data=await res.json().catch(()=>({}));
-        if(!res.ok||data.error){alert(t('operationFailed')+(data.error||res.status));return;}
-        await fetchSkills();
-      }catch(e){alert(t('operationFailed')+e.message);}
-    }
     async function deleteSkill(n){
       if(!confirm(t('deleteSkillConfirmPrefix')+n+t('deleteSkillConfirmSuffix')))return;
       try{

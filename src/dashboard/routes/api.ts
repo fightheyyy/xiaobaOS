@@ -15,7 +15,6 @@ import { RoleResolver } from '../../utils/role-resolver';
 import { RoleManager } from '../../roles/role-manager';
 import { SkillParser } from '../../skills/skill-parser';
 import type { Skill } from '../../types/skill';
-import { CapabilityStatus, parseCapabilityStatus } from '../../types/capability-status';
 import matter from 'gray-matter';
 import { execSync } from 'child_process';
 import { APP_VERSION } from '../../version';
@@ -25,7 +24,6 @@ import { getDashboardObservabilityReviewState } from '../observability-actions';
 // import { LogUploader } from '../../utils/log-uploader';
 
 const DASHBOARD_PAGES = new Set(['services', 'pet', 'config', 'skills', 'roles', 'store']);
-const DISABLED_SKILL_SUFFIX = '.disabled';
 const DASHBOARD_HIDDEN_SKILLS = new Set(['sub-agent', 'background-task-runner']);
 let dashboardNavigationRequest: { id: number; page: string; createdAt: number } | null = null;
 let dashboardNavigationRequestId = 0;
@@ -266,50 +264,6 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
     }
   });
 
-  router.post('/roles/:name/block', (req, res) => {
-    try {
-      const role = RoleManager.getRole(req.params.name);
-      if (!role) throw new Error(`Role not found: ${req.params.name}`);
-      const transition = transitionRoleStatus(req.params.name, ['active', 'candidate'], 'blocked');
-      if (role.active) {
-        RoleResolver.clearActiveRole();
-      }
-      const runningServices = serviceManager.getAll().filter(service => service.status === 'running');
-      res.json({
-        ok: true,
-        ...transition,
-        active: getDashboardActiveRole(),
-        requiresRestart: runningServices.length > 0,
-      });
-    } catch (e: any) {
-      res.status(lifecycleErrorStatus(e)).json({ error: e.message });
-    }
-  });
-
-  router.post('/roles/:name/unblock', (req, res) => {
-    try {
-      res.json({
-        ok: true,
-        ...transitionRoleStatus(req.params.name, ['blocked'], 'candidate'),
-        active: getDashboardActiveRole(),
-      });
-    } catch (e: any) {
-      res.status(lifecycleErrorStatus(e)).json({ error: e.message });
-    }
-  });
-
-  router.post('/roles/:name/promote', (req, res) => {
-    try {
-      res.json({
-        ok: true,
-        ...transitionRoleStatus(req.params.name, ['candidate'], 'active'),
-        active: getDashboardActiveRole(),
-      });
-    } catch (e: any) {
-      res.status(lifecycleErrorStatus(e)).json({ error: e.message });
-    }
-  });
-
   router.delete('/roles/:name', (req, res) => {
     try {
       const result = RoleManager.removeRole(req.params.name);
@@ -334,7 +288,7 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
       const skills = await withTemporaryRole(roleName, async () => {
         const manager = new SkillManager();
         await manager.loadSkills();
-        return manager.getAllManagedSkills().map(s => ({
+        return manager.getAllSkills().map(s => ({
           name: s.metadata.name,
           aliases: s.metadata.aliases || [],
           description: s.metadata.description,
@@ -342,7 +296,6 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
           userInvocable: s.metadata.userInvocable !== false,
           autoInvocable: s.metadata.autoInvocable !== false,
           maxTurns: s.metadata.maxTurns || null,
-          status: s.metadata.status || 'active',
           path: s.filePath,
           roleOwned: s.filePath.includes(`${path.sep}roles${path.sep}`),
         }));
@@ -449,9 +402,8 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
         if (isDashboardHiddenSkill(summary)) return;
         summaries.set(normalizeSkillLookupName(summary.name), summary);
       };
-      manager.getAllManagedSkills().map(s => toDashboardSkillSummary(s)).forEach(addSummary);
+      manager.getAllSkills().map(s => toDashboardSkillSummary(s)).forEach(addSummary);
       findEnabledBaseSkillsForDashboard().forEach(addSummary);
-      findDisabledSkillsForDashboard().forEach(addSummary);
       res.json([...summaries.values()]);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -462,7 +414,7 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
     try {
       const manager = new SkillManager();
       await manager.loadSkills();
-      res.json(manager.getAllManagedSkills().map(s => ({
+      res.json(manager.getAllSkills().map(s => ({
         name: s.metadata.name,
         aliases: s.metadata.aliases || [],
         description: s.metadata.description,
@@ -470,7 +422,6 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
         userInvocable: s.metadata.userInvocable !== false,
         autoInvocable: s.metadata.autoInvocable !== false,
         maxTurns: s.metadata.maxTurns || null,
-        status: s.metadata.status || 'active',
         path: s.filePath,
         roleOwned: s.filePath.includes(`${path.sep}roles${path.sep}`),
         files: getSkillFiles(s.filePath),
@@ -484,13 +435,12 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
     try {
       const manager = new SkillManager();
       await manager.loadSkills();
-      const skill = manager.getManagedSkill(req.params.name);
+      const skill = manager.getSkill(req.params.name);
       if (!skill) return res.status(404).json({ error: 'Skill not found' });
       res.json({
         name: skill.metadata.name,
         aliases: skill.metadata.aliases || [],
         description: skill.metadata.description,
-        status: skill.metadata.status || 'active',
         content: skill.content,
         path: skill.filePath,
         roleOwned: skill.filePath.includes(`${path.sep}roles${path.sep}`),
@@ -505,70 +455,14 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
     try {
       const manager = new SkillManager();
       await manager.loadSkills();
-      const skill = manager.getManagedSkill(req.params.name);
+      const skill = manager.getSkill(req.params.name);
       if (!skill) {
-        const disabled = findDisabledSkillForDashboard(req.params.name);
-        if (disabled) {
-          fs.rmSync(path.dirname(disabled), { recursive: true, force: true });
-          return res.json({ ok: true });
-        }
-        const legacySkill = findDashboardSkillFileForDeletion(req.params.name);
-        if (legacySkill) {
-          fs.rmSync(path.dirname(legacySkill), { recursive: true, force: true });
-          return res.json({ ok: true });
-        }
         return res.status(404).json({ error: 'Skill not found' });
       }
       fs.rmSync(path.dirname(skill.filePath), { recursive: true, force: true });
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
-    }
-  });
-
-  router.post('/skills/:name/disable', async (req, res) => {
-    try {
-      res.json({
-        ok: true,
-        ...await transitionSkillStatus(req.params.name, ['active', 'candidate'], 'blocked'),
-      });
-    } catch (e: any) {
-      res.status(lifecycleErrorStatus(e)).json({ error: e.message });
-    }
-  });
-
-  // Legacy endpoint retained for callers that still say "enable". Its lifecycle
-  // meaning is intentionally only unblock -> candidate, never promotion.
-  router.post('/skills/:name/enable', async (req, res) => {
-    try {
-      res.json({
-        ok: true,
-        ...await transitionSkillStatus(req.params.name, ['blocked'], 'candidate'),
-      });
-    } catch (e: any) {
-      res.status(lifecycleErrorStatus(e)).json({ error: e.message });
-    }
-  });
-
-  router.post('/skills/:name/unblock', async (req, res) => {
-    try {
-      res.json({
-        ok: true,
-        ...await transitionSkillStatus(req.params.name, ['blocked'], 'candidate'),
-      });
-    } catch (e: any) {
-      res.status(lifecycleErrorStatus(e)).json({ error: e.message });
-    }
-  });
-
-  router.post('/skills/:name/promote', async (req, res) => {
-    try {
-      res.json({
-        ok: true,
-        ...await transitionSkillStatus(req.params.name, ['candidate'], 'active'),
-      });
-    } catch (e: any) {
-      res.status(lifecycleErrorStatus(e)).json({ error: e.message });
     }
   });
 
@@ -587,10 +481,7 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
       const registry = mergeRegistries(local, remote);
       const manager = new SkillManager();
       await manager.loadSkills();
-      const installed = new Set(manager.getAllManagedSkills().map(s => s.metadata.name));
-      // 也算上disabled的
-      const disabled = findDisabledSkillsForDashboard();
-      disabled.forEach(s => installed.add(s.name));
+      const installed = new Set(manager.getAllSkills().map(s => s.metadata.name));
 
       const available = registry
         .filter(entry => !isDashboardHiddenSkillName(entry.name))
@@ -633,7 +524,7 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
         return res.status(500).json({ error: 'Skill 安装失败，请检查 URL 是否正确' });
       }
 
-      const installedSkills = markInstalledSkillsCandidate(targetDir);
+      const installedSkills = validateInstalledSkills(targetDir);
 
       // 安装依赖
       installPythonDeps(targetDir, warnings);
@@ -641,7 +532,6 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
 
       res.json({
         ok: true,
-        status: 'candidate',
         skills: installedSkills,
         warnings: warnings.length > 0 ? warnings : undefined,
       });
@@ -680,7 +570,7 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
         return res.status(500).json({ error: 'Skill 安装失败，请检查 URL 是否正确' });
       }
 
-      const installedSkills = markInstalledSkillsCandidate(targetDir);
+      const installedSkills = validateInstalledSkills(targetDir);
 
       // 安装依赖
       installPythonDeps(targetDir, warnings);
@@ -689,7 +579,6 @@ export function createApiRouter(serviceManager: ServiceManager, options: Dashboa
       res.json({
         ok: true,
         name: repoName,
-        status: 'candidate',
         skills: installedSkills,
         warnings: warnings.length > 0 ? warnings : undefined,
       });
@@ -1002,7 +891,6 @@ function getBaseRoleSummary(activeRole?: string | null): any {
     aliases: ['default', 'none'],
     promptFile: 'system-prompt.md',
     active: !activeRole,
-    status: 'active',
     path: null,
     roleSkillCount: 0,
     roleSkills: [],
@@ -1015,7 +903,7 @@ function getRoleSummary(roleName: string, activeRole?: string | null): any {
     return getBaseRoleSummary(activeRole);
   }
 
-  const resolvedRoleName = RoleResolver.resolveManagedRoleDirectoryName(roleName);
+  const resolvedRoleName = RoleResolver.resolveRoleDirectoryName(roleName);
   if (!resolvedRoleName) {
     throw new Error(`Role not found: ${roleName}`);
   }
@@ -1032,7 +920,6 @@ function getRoleSummary(roleName: string, activeRole?: string | null): any {
     inheritBaseSkills: config?.inheritBaseSkills !== false,
     excludeBaseSkills: config?.excludeBaseSkills || [],
     active: !!activeRole && RoleResolver.normalizeRoleName(activeRole) === RoleResolver.normalizeRoleName(resolvedRoleName),
-    status: config?.status || 'active',
     path: fs.existsSync(rolePath) ? rolePath : null,
     roleSkillCount: roleSkills.length,
     roleSkills,
@@ -1124,15 +1011,9 @@ interface DashboardSkillSummary {
   path: string;
   roleOwned: boolean;
   files: string[];
-  enabled: boolean;
-  status: CapabilityStatus;
 }
 
-function toDashboardSkillSummary(
-  skill: Skill,
-  enabled: boolean = skill.metadata.status !== 'blocked',
-): DashboardSkillSummary {
-  const status: CapabilityStatus = enabled ? (skill.metadata.status || 'active') : 'blocked';
+function toDashboardSkillSummary(skill: Skill): DashboardSkillSummary {
   return {
     name: skill.metadata.name,
     aliases: skill.metadata.aliases || [],
@@ -1144,8 +1025,6 @@ function toDashboardSkillSummary(
     path: skill.filePath,
     roleOwned: skill.filePath.includes(`${path.sep}roles${path.sep}`),
     files: getSkillFiles(skill.filePath),
-    enabled,
-    status,
   };
 }
 
@@ -1159,27 +1038,6 @@ function isDashboardHiddenSkill(summary: DashboardSkillSummary): boolean {
   }
   const parentDir = path.basename(path.dirname(summary.path || ''));
   return parentDir ? isDashboardHiddenSkillName(parentDir) : false;
-}
-
-function findDisabledSkillForDashboard(name: string): string | null {
-  for (const basePath of getDashboardSkillSearchPaths()) {
-    const found = findDisabledSkillByName(basePath, name);
-    if (found) return found;
-  }
-  return null;
-}
-
-function findDisabledSkillsForDashboard(): DashboardSkillSummary[] {
-  const seen = new Set<string>();
-  const results: DashboardSkillSummary[] = [];
-  for (const basePath of getDashboardSkillSearchPaths()) {
-    for (const skill of findAllDisabledSkills(basePath)) {
-      if (seen.has(skill.path)) continue;
-      seen.add(skill.path);
-      results.push(skill);
-    }
-  }
-  return results;
 }
 
 function findEnabledBaseSkillsForDashboard(): DashboardSkillSummary[] {
@@ -1196,222 +1054,14 @@ function findEnabledBaseSkillsForDashboard(): DashboardSkillSummary[] {
     });
 }
 
-function getDashboardSkillSearchPaths(): string[] {
-  const paths = [PathResolver.getBaseSkillsPath(), PathResolver.getRoleSubPath('skills')]
-    .filter((candidate): candidate is string => Boolean(candidate));
-  return Array.from(new Set(paths));
-}
-
-function findDisabledSkillByName(basePath: string, name: string): string | null {
-  if (!fs.existsSync(basePath)) return null;
-  const targetName = normalizeSkillLookupName(name);
-  for (const entry of fs.readdirSync(basePath, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const fullPath = path.join(basePath, entry.name);
-    const disabledFile = path.join(fullPath, 'SKILL.md.disabled');
-    if (fs.existsSync(disabledFile)) {
-      const skill = parseDisabledSkill(disabledFile, entry.name);
-      const aliases = [skill.name, ...skill.aliases, path.basename(path.dirname(disabledFile))];
-      if (aliases.some(alias => normalizeSkillLookupName(alias) === targetName)) {
-        return disabledFile;
-      }
-    }
-    const found = findDisabledSkillByName(fullPath, name);
-    if (found) return found;
-  }
-  return null;
-}
-
-function findDashboardSkillFileForDeletion(name: string): string | null {
-  for (const basePath of getDashboardSkillSearchPaths()) {
-    const found = findSkillFileByName(basePath, name);
-    if (found) return found;
-  }
-  return null;
-}
-
-function findSkillFileByName(basePath: string, name: string): string | null {
-  if (!fs.existsSync(basePath)) return null;
-  const targetName = normalizeSkillLookupName(name);
-  for (const entry of fs.readdirSync(basePath, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const fullPath = path.join(basePath, entry.name);
-    for (const fileName of ['SKILL.md', 'SKILL.md.disabled']) {
-      const skillFile = path.join(fullPath, fileName);
-      if (!fs.existsSync(skillFile)) continue;
-      const skill = fileName.endsWith(DISABLED_SKILL_SUFFIX)
-        ? parseDisabledSkill(skillFile, entry.name)
-        : parseEnabledSkillSummary(skillFile, entry.name);
-      const aliases = [skill.name, ...skill.aliases, path.basename(path.dirname(skillFile))];
-      if (aliases.some(alias => normalizeSkillLookupName(alias) === targetName)) {
-        return skillFile;
-      }
-    }
-    const found = findSkillFileByName(fullPath, name);
-    if (found) return found;
-  }
-  return null;
-}
-
-function findAllDisabledSkills(basePath: string): DashboardSkillSummary[] {
-  const results: DashboardSkillSummary[] = [];
-  if (!fs.existsSync(basePath)) return results;
-  for (const entry of fs.readdirSync(basePath, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const fullPath = path.join(basePath, entry.name);
-    const disabledFile = path.join(fullPath, 'SKILL.md.disabled');
-    if (fs.existsSync(disabledFile)) {
-      results.push(parseDisabledSkill(disabledFile, entry.name));
-    }
-    results.push(...findAllDisabledSkills(fullPath));
-  }
-  return results;
-}
-
-function parseEnabledSkillSummary(skillFile: string, fallbackName: string): DashboardSkillSummary {
-  try {
-    return toDashboardSkillSummary(SkillParser.parse(skillFile), true);
-  } catch {
-    return parseSkillFrontmatterSummary(skillFile, fallbackName, true);
-  }
-}
-
-function parseDisabledSkill(disabledFile: string, fallbackName: string): DashboardSkillSummary {
-  try {
-    return toDashboardSkillSummary(SkillParser.parse(disabledFile), false);
-  } catch {
-    return parseSkillFrontmatterSummary(disabledFile, fallbackName, false);
-  }
-}
-
-function parseSkillFrontmatterSummary(skillFile: string, fallbackName: string, enabled: boolean): DashboardSkillSummary {
-  const content = fs.readFileSync(skillFile, 'utf-8');
-  const { data } = matter(content);
-  const name = asNonEmptyString(data.name) || fallbackName;
-  const status: CapabilityStatus = enabled
-    ? parseCapabilityStatus(data.status, `skill ${name}`)
-    : 'blocked';
-  return {
-    name,
-    aliases: Array.isArray(data.aliases) ? data.aliases.filter((alias): alias is string => typeof alias === 'string') : [],
-    description: asNonEmptyString(data.description) || '',
-    argumentHint: asNonEmptyString(data['argument-hint'] || data.argumentHint),
-    userInvocable: data['user-invocable'] !== false && data.invocable !== 'agent',
-    autoInvocable: data['auto-invocable'] !== false && data.autoInvocable !== false && data.invocable !== 'user',
-    maxTurns: data['max-turns'] ? Number(data['max-turns']) : null,
-    path: skillFile,
-    roleOwned: skillFile.includes(`${path.sep}roles${path.sep}`),
-    files: getSkillFiles(skillFile),
-    enabled,
-    status,
-  };
-}
-
-interface CapabilityStatusTransition {
-  name: string;
-  previous_status: CapabilityStatus;
-  status: CapabilityStatus;
-}
-
-async function transitionSkillStatus(
-  name: string,
-  expectedStatuses: CapabilityStatus[],
-  nextStatus: CapabilityStatus,
-): Promise<CapabilityStatusTransition> {
-  const manager = new SkillManager();
-  await manager.loadSkills();
-  const skill = manager.getManagedSkill(name);
-  if (skill) {
-    const currentStatus = skill.metadata.status || 'active';
-    assertLifecycleTransition('Skill', skill.metadata.name, currentStatus, expectedStatuses, nextStatus);
-    updateSkillStatus(skill.filePath, nextStatus);
-    return {
-      name: skill.metadata.name,
-      previous_status: currentStatus,
-      status: nextStatus,
-    };
-  }
-
-  const disabledFile = findDisabledSkillForDashboard(name);
-  if (!disabledFile) {
-    throw new Error(`Skill not found: ${name}`);
-  }
-  const disabled = parseDisabledSkill(disabledFile, path.basename(path.dirname(disabledFile)));
-  const currentStatus: CapabilityStatus = 'blocked';
-  assertLifecycleTransition('Skill', disabled.name, currentStatus, expectedStatuses, nextStatus);
-  const enabledPath = disabledFile.slice(0, -DISABLED_SKILL_SUFFIX.length);
-  fs.renameSync(disabledFile, enabledPath);
-  updateSkillStatus(enabledPath, nextStatus);
-  return {
-    name: disabled.name,
-    previous_status: currentStatus,
-    status: nextStatus,
-  };
-}
-
-function transitionRoleStatus(
-  name: string,
-  expectedStatuses: CapabilityStatus[],
-  nextStatus: CapabilityStatus,
-): CapabilityStatusTransition {
-  const resolved = RoleResolver.resolveManagedRoleDirectoryName(name);
-  if (!resolved) {
-    throw new Error(`Role not found: ${name}`);
-  }
-  const configPath = path.join(RoleResolver.getRolesRoot(), resolved, 'role.json');
-  if (!fs.existsSync(configPath)) {
-    throw new Error(`Role not found: ${name}`);
-  }
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-  const currentStatus = parseCapabilityStatus(config.status, `role ${resolved}`);
-  assertLifecycleTransition('Role', resolved, currentStatus, expectedStatuses, nextStatus);
-  fs.writeFileSync(configPath, `${JSON.stringify({ ...config, status: nextStatus }, null, 2)}\n`, 'utf-8');
-  return {
-    name: resolved,
-    previous_status: currentStatus,
-    status: nextStatus,
-  };
-}
-
-function assertLifecycleTransition(
-  kind: 'Skill' | 'Role',
-  name: string,
-  currentStatus: CapabilityStatus,
-  expectedStatuses: CapabilityStatus[],
-  nextStatus: CapabilityStatus,
-): void {
-  if (expectedStatuses.includes(currentStatus)) return;
-  throw new Error(
-    `${kind} "${name}" is ${currentStatus}; ${nextStatus} requires status ${expectedStatuses.join(' or ')}.`,
-  );
-}
-
-function lifecycleErrorStatus(error: unknown): number {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/not found/i.test(message)) return 404;
-  if (/requires status/i.test(message)) return 409;
-  return 400;
-}
-
-function updateSkillStatus(skillFile: string, status: CapabilityStatus): void {
-  SkillParser.updateStatus(skillFile, status);
-}
-
-function markInstalledSkillsCandidate(skillRoot: string): string[] {
+function validateInstalledSkills(skillRoot: string): string[] {
   const skillFiles = PathResolver.findSkillFiles(skillRoot);
   if (skillFiles.length === 0) {
     fs.rmSync(skillRoot, { recursive: true, force: true });
     throw new Error('安装包中没有找到有效的 SKILL.md');
   }
   const skills = skillFiles.map(filePath => SkillParser.parse(filePath));
-  for (const skill of skills) {
-    SkillParser.updateStatus(skill.filePath, 'candidate');
-  }
   return skills.map(skill => skill.metadata.name);
-}
-
-function asNonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function normalizeSkillLookupName(value: string): string {

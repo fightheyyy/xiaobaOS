@@ -1,136 +1,170 @@
 # Evaluation SPEC
 
 状态：Active
-最后更新：2026-07-20
-适用范围：历史 Trace Replay、Live Agent Eval、benchmark source、verifier 和 scorecard gate。
+最后更新：2026-07-29
+适用范围：Test、Case Replay、Agent Eval、Verifier、ReviewerCat Judge。
 
-本文是 XiaoBa-CLI 六个顶层模块之一 `Evaluation` 的唯一架构真相源。它同时定义 Engineering Test、Trace Replay 和 Live Agent Eval 的边界；前者验证代码，Replay 回答“同款历史输入现在会发生什么”，Live Agent Eval 回答“curated benchmark 是否通过”。
+本文是 XiaoBa-CLI `Evaluation` 模块的唯一架构真相源。
 
 ## Problem
 
-Agent 的历史 trace、工程测试、真实行为复跑和 benchmark scorecard 都有价值，但不能都叫 eval：
+工程正确性和 Agent 行为能力不是同一件事：
 
-- Trace Replay 是本地排障和回归观察，不给能力打最终分。
-- Live Agent Eval 必须重新驱动当前 runtime，验证新产生的 tool/result/artifact/delivery evidence，并输出 scorecard。
-- Unit、integration 和 deterministic contract smoke 属于 `test/`，不属于 Evaluation gate。
-- Arena 验收候选 skill / role 的可信度，不自动接纳 benchmark source。
+- Test 验证代码、Runtime、Tool、协议和安全约束是否按实现工作。
+- Eval 验证真实 Agent 面对任务时能否完成，以及成功率、稳定性、安全性和成本。
+- Trace 是两者共享的运行证据。
+- Case 是两者可共享的可执行输入。
+- Replay 只执行 Case 并产生新 Trace，不负责裁决。
+
+任何预写模型响应或工具调用序列都只能叫 `Scripted Runtime Test`，不能作为 Agent 行为能力证据。
 
 ## Scope
 
 In scope:
 
-- `src/replay/**`、`src/commands/replay.ts`、`scripts/run-trace-replay.ts`。
-- `src/eval/**`、`eval/**`、`scripts/run-eval-*.ts`。
-- historical trace input extraction、fresh runtime rerun 和 lightweight comparison。
-- curated live benchmark setup、replay、hard verifier、report 和 scorecard。
-- `npm run replay:trace`、`npm run eval:base-runtime`、`npm run eval:gate`、`npm run check:benchmarks`。
+- `src/eval/evaluation.ts` 的 Case、Oracle、Outcome 和 EvaluationResult。
+- `src/replay/case-replay.ts` 的真实 Runtime Replay adapter。
+- `src/eval/reviewer-cat-judge.ts` 的共享语义 Judge。
+- Verifier hard checks、重复运行和事实聚合。
+- `src/testing/**` 与 `test/scripted-runtime/**` 的 Test 语义边界。
 
 Out of scope:
 
-- Unit、integration、contract smoke 和 deterministic runtime checks 位于 `test/**`，但语义边界由本文统一维护。
-- 原始 trace、artifact 和 delivery evidence 的事实源，属于 [`../observability-evidence/SPEC.md`](../observability-evidence/SPEC.md)。
-- 外部 skill / 本地 role 的候选接入和可信验收，属于 [`../arena/SPEC.md`](../arena/SPEC.md)。
-- 自动把 observability proposal、Replay output 或 Arena run 接纳为 benchmark source。
+- Trace 的持久化和脱敏，属于 Observability & Evidence。
+- UserCat 场景探索，属于 Arena。
+- Candidate 生成与激活，属于 Roles & Skills 的 Evolution 控制 DAG。
+- 把 Report、Gate 或 Dashboard 状态作为第二套裁决。
 
 ## Current Architecture
 
-当前两条主线已经物理分开。Trace Replay 读取历史 `traces.jsonl`，重新驱动当前 Pet/Chat runtime 并输出 fresh trace 和轻量比较；Live Agent Eval 当前只保留 BaseRuntime 11 条 live case，通过 `surface_runtime` 产生新证据并运行 hard verifiers。Scheduled Repair 的 Reviewer replay 还可把 detached Patch worktree 作为 code root，通过独立 `tsx` 子进程加载候选代码，并只暴露 `read_file / grep / glob`；其 durable replay artifact 会迁回 DAG run root，行为型修复随后由 Arena 多次调用同一隔离 replay 路径。
+轻量 Eval 核心已经实现。`runEvaluation` 默认每个 Case 运行三次；每次 Replay 都必须产生 fresh Trace，Verifier 硬失败直接形成 Outcome，硬检查通过后才由独立只读 ReviewerCat Session 做语义判断。状态只有 `pass | fail | blocked`。
+
+旧的预写响应 runner 仍作为内部兼容实现存在，但公共入口已迁到 `src/testing`，命令和产物统一使用 Scripted Runtime Test 语义。`xiaoba eval run --case-set <file>` 已直接组合真实 Case Replay、最小 hard Verifier registry 和 ReviewerCat Judge；当前 registry 只内置 `trace_exists`、`no_failed_tools` 与 `read_only_tools`。首个维护中的 `eval/case-sets/xiaoba-core-readonly.json` 包含三条不预写模型响应的真实 Agent Case。
+
+Replay 默认使用 `read_only` policy，只向被测 Agent 暴露 `read_file`、`glob` 和 `grep`。Case 可以显式声明 `workspace_write`，但该模式只有在 Arena/Evolution 提供 enforced clean runtime 时才开放工作区文件与 Shell 工具；外部消息、Browser、GUI 和 Secretary 工具不属于 Replay 能力集。
 
 ```mermaid
 flowchart LR
-    OldTrace["historical trace"] --> Extract["extract user input"]
-    Extract --> CurrentRuntime["current runtime"]
-    CurrentRuntime --> FreshTrace["fresh trace"]
-    FreshTrace --> Compare["comparison"]
+    Fixture["Scripted fixture"] --> Test["Scripted Runtime Test"]
+    Test --> TestResult["test-result.json"]
 
-    Patch["isolated Patch Candidate"] --> PatchReplay["Reviewer Frozen Replay"]
-    PatchReplay --> PatchEvidence["durable evidence"]
-
-    Manifest["curated benchmark"] --> SurfaceReplay["live runtime replay"]
-    SurfaceReplay --> Evidence["fresh evidence"]
-    Evidence --> Verify["hard verifiers"]
-    Verify --> Scorecard["scorecard"]
+    Case["Case + Oracle"] --> Replay["Case Replay"]
+    Replay --> Trace["fresh Trace"]
+    Trace --> Verifier["Verifier hard checks"]
+    Verifier -->|pass| Reviewer["ReviewerCat Judge"]
+    Verifier -->|fail or blocked| Outcome["Outcome"]
+    Reviewer --> Outcome
+    Outcome --> Facts["EvaluationResult facts"]
 ```
 
 ## Target Architecture
 
-目标架构保持两条窄主线，不重新引入中心化 schema/rubric/governance 平台。Replay output 只能经人工整理成为 curated case；Live Agent Eval 只接纳能重新运行当前 agent/runtime 的 case。Repair 路径的 Frozen Replay 必须把隔离 Patch Candidate 的 worktree 作为 runtime code root，而不是复跑调度器所在 checkout；它先为 ReviewerCat 提供一次关闭证据，行为型修复再由 Arena 对同一冻结用例执行多次 `repair_regression`。
+目标只保留一个 Eval 执行与裁决链。Arena 和 Evolution 只调用它，不拥有自己的 Replay、Judge、Scorecard 或 Regression 实现。
 
 ```mermaid
 flowchart LR
-    subgraph Sources["Sources"]
-        Historical["historical local trace"]
-        Curated["curated benchmark case"]
-        InspectorCase["Inspector replay case"]
-        Patch["isolated Patch Candidate"]
-    end
+    CaseSet["CaseSet"] --> Eval["Shared Evaluation"]
+    Eval --> Replay["Replay real Agent"]
+    Replay --> Trace["Trace"]
+    Trace --> Verify["Verifier"]
+    Verify --> Judge["ReviewerCat Judge"]
+    Verify --> Outcome["Outcome"]
+    Judge --> Outcome
+    Outcome --> Result["EvaluationResult"]
 
-    subgraph Evaluation["Evaluation module"]
-        Replay["Trace Replay<br/>fresh rerun + comparison"]
-        LiveEval["Live Agent Eval<br/>setup + fresh behavior"]
-        Verifier["task / safety / evidence verifiers"]
-    end
-
-    subgraph Outputs["Outputs"]
-        ReplayReport["local replay report"]
-        Scorecard["benchmark scorecard"]
-        ReviewerDecision["Reviewer terminal evidence<br/>closed / next_run / blocked"]
-    end
-
-    Historical --> Replay
-    InspectorCase --> Replay
-    Patch --> Replay
-    Replay --> ReplayReport
-    ReplayReport --> ReviewerDecision
-    ReplayReport -. "human curation only" .-> Curated
-    Curated --> LiveEval
-    LiveEval --> Verifier
-    Verifier --> Scorecard
+    Arena["Arena"] --> Eval
+    Evolution["Evolution"] --> Eval
+    Result --> Report["Report view"]
+    Result --> Policy["Optional exit policy"]
 ```
+
+## Core Contracts
+
+### Case
+
+`Case` 是可执行输入，不是运行状态：
+
+```text
+case_id
+task
+setup?
+  sandbox?: read_only | workspace_write
+budget?
+oracle:
+  hard_verifiers[]
+  semantic_criteria[]
+source?:
+  trace_refs[]
+  finding?
+```
+
+Case 不包含预写模型响应、裁决、生命周期或 promotion 状态。
+
+### ReplayResult
+
+ReplayResult 只表达执行是否完成：
+
+- `completed`：产生 fresh `trace_ref`。
+- `blocked`：未能完成真实执行。
+
+它不能返回 pass/fail。
+
+### Outcome
+
+一次 Case execution 只有一个权威 Outcome：
+
+- `pass`：硬约束与语义标准均满足。
+- `fail`：观察到反例或安全失败。
+- `blocked`：无法形成有效判断。
+
+Verifier hard failure 具有否决权。ReviewerCat 只判断通过硬检查的运行。
+
+### EvaluationResult
+
+EvaluationResult 保存 Outcomes 和成功率、稳定性、安全、延迟、token、成本等事实，不再生成 overall verdict。Report 只渲染它。
 
 ## Stable Boundaries
 
-- Trace Replay 不属于 `eval:*` 命令面，不输出 benchmark pass/fail。
-- Trace Replay 的 fresh session 必须由 runtime 追加 replay provenance；呼叫者的自定义 session key 不能将派生 trace 伪装成生产交互。
-- Live Agent Eval case 必须 fresh-run 当前 runtime；只读旧 trace 或旧 artifact 的检查不是 live eval。
-- Replay、Observability 和 Arena 都不能自动写入 accepted benchmark source。
-- `test/` 是独立工程验证边界；它可以验证 Evaluation 的代码，但不属于 Evaluation gate。
-- `check:benchmarks` 只做 manifest/case/suite preflight，不冒充行为评测。
-- 当前 release eval 只聚合 BaseRuntime；未来 role benchmark 必须有输入、setup、fresh replay、expected result、hard verifiers 和 scorecard。
-
-Minimum live case shape:
-
-- Stable case id and user request.
-- Deterministic setup/fixture instructions.
-- A replay adapter that drives the current production runtime path.
-- Expected user-visible, tool, artifact or delivery outcome.
-- Task-specific hard verifiers; prose similarity alone is insufficient.
-- Generated scorecard that records every declared hard verifier.
+- ReviewerCat 每次正式 Judge 使用 fresh Session、只读 evidence、结构化输出。
+- ReviewerCat 一次看到同一 Case 的全部 Replay runs，但只为硬检查通过的 run 返回 decision。
+- ReviewerCat 缺失、重复或越界 decision 时对应运行 `blocked`，不能猜测。
+- Historical Trace 可回归成 Case；正式 Replay 的输入仍是 Case。
+- Trace 来源可标记 user、UserCat 或 replay，但 schema 与后续处理相同。
+- Replay effect policy 属于 Case setup：缺省 `read_only`；`workspace_write` 必须由 enforced clean runtime 承载，否则 blocked。
+- Benchmark 只是长期维护的 CaseSet，不是另一套 runner 或 result。
+- Gate 若存在，只把 EvaluationResult 映射成进程退出策略。
 
 ## Implementation Layout
 
 ```text
-test/                         unit / integration / deterministic smoke
-src/replay/                   historical trace replay runner
-scripts/run-trace-replay.ts   replay command adapter
-src/eval/                     live eval runner / gate
-eval/benchmarks/              curated live benchmark source
-output/replay/                generated replay output
-output/eval/                  generated eval output
+src/eval/evaluation.ts             shared Eval contracts and orchestration
+src/eval/evaluation-files.ts       CaseSet input and canonical result output
+src/eval/verifier-registry.ts      minimal hard verifier registry
+src/eval/reviewer-cat-judge.ts     ReviewerCat semantic Judge adapter
+src/replay/case-replay.ts          Case -> real Runtime -> fresh Trace
+src/replay/replay-services.ts      Replay-visible tools and effect policy
+src/commands/eval.ts               real CaseSet Eval CLI
+eval/case-sets/                     maintained real Agent CaseSets
+src/testing/                       deterministic Test facade and implementation
+test/scripted-runtime/             scripted Runtime fixtures
+output/test/                       generated Test evidence
+output/eval/                       generated Eval evidence
 ```
 
-Stable command meanings:
+旧 Scripted Runtime Test engine 已物理迁入 `src/testing/**`。其内部仍保留少量 `Eval*` 兼容类型名，但不再位于 `src/eval`、不从 Eval 公共 API 导出，也不写入默认 `output/eval/**`。
 
-- `npm test` and `npm run test:*`: code correctness and deterministic contracts.
-- `npm run replay:trace`: historical input rerun with fresh evidence; no benchmark verdict.
-- `npm run eval:base-runtime`: current BaseRuntime live cases.
-- `npm run eval:gate`: live agent eval aggregation only.
-- `npm run check:benchmarks`: manifest/case/suite reference preflight only.
+## Commands
+
+- `npm test`：工程测试。
+- `npm run test:base-runtime`：预写模型动作的 Scripted Runtime Test。
+- `npm run test:check-scripted-runtime`：Test fixture preflight。
+- `npm run replay:trace`：历史 Trace 输入兼容入口；产生 fresh Trace。
+- `xiaoba eval run --case-set <file>`：真实 Agent CaseSet Evaluation。
+- `xiaoba eval run --case-set eval/case-sets/xiaoba-core-readonly.json`：维护中的只读核心 CaseSet。
 
 ## Interaction With Other Modules
 
-- Agent Runtime 提供当前被复跑的 AgentSession、ConversationRunner 和 ToolManager。
-- Surface 提供 Pet/Chat 等真实入口。
-- Observability & Evidence 提供历史输入和 fresh evidence 的本地事实源。
-- Roles & Skills 提供被评测的 Base/Role/Skill 策略。
-- Arena 可以引用 Evaluation 结果，但不能自动改变 Evaluation source。
+- Agent Runtime 提供真实 AgentSession、ConversationRunner 和 ToolManager。
+- Observability & Evidence 保存 fresh Trace 和 artifact refs。
+- Roles & Skills 提供 ReviewerCat、被测 Role/Skill 和 Evolution 调用方。
+- Arena 生成 Case 并调用本模块，不复制裁决链。

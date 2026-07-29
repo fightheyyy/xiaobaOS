@@ -1,77 +1,79 @@
 # Evaluation PLAN
 
 状态：Active
-最后更新：2026-07-20
+最后更新：2026-07-29
 Owner：Runtime / Evaluation maintainers
 
 ## Current Status
 
-- Engineering tests, Trace Replay and Live Agent Eval have separate commands and meanings.
-- Trace Replay reads historical Pet/Chat input, drives the current runtime and writes fresh evidence plus lightweight comparison.
-- Trace Replay appends runtime-owned replay provenance to every fresh session, including calls with a custom session key.
-- Live Agent Eval currently contains one BaseRuntime manifest with 11 fresh-run cases.
-- `eval:gate` aggregates live eval only; `check:benchmarks` performs source preflight only.
-- Legacy static/mixed role benchmarks are removed.
-- Trace Replay is not yet side-effect safe and role live eval has not been rebuilt.
-- The evolution DAG uses Inspector-authored replay cases and Reviewer terminal evidence (`closed | next_run | blocked`); same-run repair back-edges are forbidden.
-- Repair replay now launches the detached Patch worktree code in a separate read-only child process; behavior-impacting candidates reuse that path for Arena multi-attempt regression.
+- Test / Eval / Trace / Case / Replay 的语义边界已确定。
+- 轻量 `Case + Oracle → Replay → Trace → Verifier → ReviewerCat → Outcome` 核心已实现并测试。
+- Case Replay adapter 已能驱动当前 Pet/Agent Runtime，并且只返回 fresh Trace ref；生产默认通过隔离子进程执行。
+- ReviewerCat Judge adapter 使用独立只读 Session 和结构化输出。
+- Outcome 只保留 `pass | fail | blocked`；EvaluationResult 只保存事实。
+- BaseRuntime 预写响应已迁到 `test/scripted-runtime/**`、`src/testing/**` 和 `output/test/**`。
+- 旧 Scripted Runtime Test engine 已整体移入 `src/testing/**`；`src/eval/**` 只保留真实 Agent Eval。
+- 真实 CaseSet CLI 已接入；Verifier registry 保持为 `trace_exists`、`no_failed_tools` 与 `read_only_tools` 三项。
+- 首个维护中的 `xiaoba-core-readonly-v1` 已建立，包含 Base、EngineerCat、ReviewerCat 三条真实 Agent Case。
+- Replay 默认只读；`workspace_write` 必须显式声明并由 enforced clean runtime 承载，外部 delivery / Browser / GUI / Secretary 工具不进入 Replay。
+- Arena 默认命令与 nightly Evolution 已调用同一个 Evaluation core。
 
 ```mermaid
 flowchart LR
-    Tests["test:*<br/>code correctness"] --> Gate["release evidence"]
-    History["historical trace"] --> Replay["replay:*<br/>fresh rerun"]
-    Cases["curated live cases"] --> Eval["eval:*<br/>verifier + scorecard"]
+    Done["Core contracts + orchestration"] --> Partial["Production adapters"]
+    Partial --> Default["Default Eval CLI"]
 ```
 
 ## Milestones
 
-1. Test / Replay / Eval boundary：completed。
-2. Trace Replay v1：completed。
-3. BaseRuntime 11-case live eval：completed。
-4. Live-only eval gate and benchmark preflight：completed。
-5. Replay side-effect isolation：not started。
-6. Role-owned live eval：not started after legacy asset removal。
-7. Multi-run real-model effectiveness evidence：partial；one bounded positive loop exists, while cross-provider / cross-seed repetition remains future work。
-8. Evolution formal-replay contract：completed for deterministic DAG coverage and one real-provider `evolution`-route proof。
-9. Isolated Patch replay contract：completed for worktree/process isolation, durable evidence relocation and conditional Arena regression；real-provider Repair proof remains future evidence。
+1. 明确 Test / Eval / Replay 边界：completed。
+2. 实现轻量 Evaluation core：completed。
+3. 实现 ReviewerCat shared Judge adapter：completed。
+4. 实现 Case Replay adapter：completed。
+5. 将 Scripted Runtime Test 移出 Eval 公共语义：completed。
+6. 接入最小生产 Verifier registry：completed；后续按真实 Case 需求扩展。
+7. 提供真实 CaseSet CLI：completed。
+8. 将旧 Eval-named Test engine 文件移出 `src/eval`：completed。
+9. 建立首个维护中的真实 CaseSet：completed。
+10. 建立 Replay effect isolation：completed for default read-only and macOS clean-runtime workspace-write；其他平台 fail closed。
 
 ## Next Steps
 
-- Add side-effect-safe replay behavior before arbitrary historical reruns.
-- Keep `eval/` live-only and source authoring manual.
-- Rebuild role eval only with task-specific setup, expected result and hard verifiers.
-- Keep deterministic runtime checks under `test:*`.
-- Do not reintroduce generic schema/rubric/governance directories.
+- 只在真实 Case 需要时增加新的 hard Verifier，避免搬回旧巨型 verifier registry。
+- 用真实回归逐步扩充当前 CaseSet，不先造 benchmark taxonomy。
+- 只在实际维护相关代码时逐步收敛 `src/testing/**` 内部旧 `Eval*` 类型名，不单独发起机械改名。
 
 ## Owners
 
-- Engineering verification：`test/**`
-- Trace Replay：`src/replay/**`, `src/commands/replay.ts`, `scripts/run-trace-replay.ts`
-- Live eval runtime：`src/eval/**`, `scripts/run-eval-*.ts`
-- Benchmark source：`eval/benchmarks/**`
+- Shared Eval：`src/eval/evaluation.ts`
+- Reviewer Judge：`src/eval/reviewer-cat-judge.ts`
+- Replay：`src/replay/**`
+- Scripted Runtime Test：`src/testing/**`, `test/scripted-runtime/**`
 
 ## Acceptance Criteria
 
-- `test:*`, `replay:*`, `eval:*` and `check:*` remain semantically distinct.
-- Trace Replay does not output benchmark pass/fail or auto-author accepted cases.
-- Trace Replay output remains identifiable as replay evidence regardless of caller-supplied session naming.
-- Patch replay loads code from the pinned candidate worktree in a separate process, exposes only read-only tools, and persists its fresh evidence before the worktree is removed.
-- Every Live Agent Eval case fresh-runs the current runtime.
-- `eval:gate` contains only live behavior evaluation.
-- Benchmark preflight does not claim behavior correctness.
-- Evaluation architecture changes update this PLAN and [`SPEC.md`](SPEC.md) only.
+- 预写模型响应永远不被报告为 Agent Eval。
+- Replay 驱动真实 Agent、产生 fresh Trace，且不输出 pass/fail。
+- Replay 缺省只暴露只读工具；写入模式必须在 enforced clean runtime 中执行。
+- 每个 execution 只有一个 Outcome。
+- Verifier hard failure 否决 Reviewer pass。
+- ReviewerCat fresh、只读、结构化，且看到同 Case 的全部 runs。
+- Arena 和 Evolution 调用同一个 Evaluation runner。
+- Report 和可选 Gate 不产生第二份权威 Result。
 
 ## Risks / Open Questions
 
-- Replay can execute current real side effects and does not restore historical workspace state.
-- BaseRuntime uses scripted model decisions and does not prove broad real-model role effectiveness.
-- No default role benchmark currently provides fresh-run release evidence.
-- The single current-contract `evo-closeout-v2-formatter` closed loop proves one exact output-protocol contract and the promotion workflow, not broad autonomous improvement or cross-provider generalization.
-- Patch regression currently has deterministic integration coverage but no preserved real-provider Repair closure proof.
+- `workspace_write` 的原生 clean-runtime sandbox 当前只支持 macOS；其他平台 fail closed。
+- 当前维护 CaseSet 只有三条只读 Case，尚不代表广泛 Agent 能力。
+- 旧 Test engine 的内部类型仍带少量 `Eval*` 名称；它们已被限制在 `src/testing/**`，后续随实际修改逐步收敛。
 
 ## Recent Verification
 
-- Patch DAG/regression/Reviewer replay focused tests passed 52/52; full repository verification passed 654/654 across 100 suites, and `npm run build` passed.
-- On 2026-07-15, two independent real-provider Pet sessions failed the same strict closeout verifier (0/2), InspectorCat routed the repeated finding to EvolutionCat, and Arena rejected one generated revision as `unstable` instead of manufacturing a positive result.
-- EvolutionCat generated the accepted `evo-closeout-v2-formatter` Candidate; current Arena code then passed 7/7 native turns across 3/3 independently bound UserCat sessions with 0 violations. Explicit CLI promotion re-read the raw traces, content-addressed 5 consumed evidence files, promoted only the immutable Arena snapshot, and two fresh production Pet sessions passed (2/2) with the Skill active.
-- The current source traces, typed route, immutable snapshot, Arena identity/output attestations, promotion receipt and post-promotion traces are preserved under `output/evolution/proofs/2026-07-15-evo-closeout-v3/` rather than committed as product runtime assets; its verifier recomputes the raw hashes and closure assertions.
+- `npm run build` passed。
+- 清理后 `npm test` passed 556/556 across 100 suites。
+- Scripted Runtime Test focused tests passed 45/45。
+- Contract smoke passed 23/23。
+- `npm run test:base-runtime -- --allow-fail` passed 11/11。
+- `npm run test:check-scripted-runtime` passed 1 manifest / 11 cases。
+- Source Candidate、Replay isolation 与 maintained CaseSet focused tests passed 22/22 across 6 suites。
+- 旧 `src/eval` Test engine 路径引用检查为零，`git diff --check` passed。

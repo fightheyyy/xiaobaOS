@@ -3,6 +3,7 @@ import { Message, ChatConfig, ChatResponse, ContentBlock } from '../types';
 import { ToolDefinition } from '../types/tool';
 import { AIProvider, StreamCallbacks } from './provider';
 import { ContextDebugLogger } from '../utils/context-debug-logger';
+import { arenaLiveAuditEnabled } from '../arena/live-audit';
 
 /**
  * Anthropic Provider
@@ -19,6 +20,7 @@ export class AnthropicProvider implements AIProvider {
       apiKey: config.apiKey!,
       baseURL: this.normalizeBaseURL(config.apiUrl!),
       timeout: 10 * 60 * 1000, // 10 分钟，Opus 长输出需要足够时间
+      maxRetries: arenaLiveAuditEnabled() ? 0 : 2,
       defaultHeaders: {
         'User-Agent': 'XiaoBa/0.1.0',
         'x-stainless-lang': undefined as any,

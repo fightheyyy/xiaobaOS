@@ -1,7 +1,7 @@
 # Agent Runtime SPEC
 
 状态：Active
-最后更新：2026-07-22
+最后更新：2026-07-29
 适用范围：XiaoBa 的核心 agent harness runtime，包括 `src/core`、`src/providers`、`src/tools`、`src/types/tool.ts` 和 runtime-facing harness docs。
 
 本文是顶层架构模块之一的 Agent Runtime spec。它定义 agent loop、provider transcript、tool boundary 和 session lifecycle；入口、角色策略、观测证据、评测和 Arena 分别由各自模块 spec 维护。
@@ -26,7 +26,7 @@ Out of scope:
 - 平台入口协议和用户可见交付，属于 `docs/surface/SPEC.md`。
 - Role/skill policy，属于 `docs/roles-skills/SPEC.md`。
 - 日志、artifact 和 trace projection 的持久化证据边界，属于 [`../observability-evidence/SPEC.md`](../observability-evidence/SPEC.md)。
-- Deterministic smoke、Trace Replay、verifier 和 scorecard 归 [`../evaluation/SPEC.md`](../evaluation/SPEC.md)。
+- Test、Case Replay、Verifier、Reviewer Judge 和 EvaluationResult 归 [`../evaluation/SPEC.md`](../evaluation/SPEC.md)。
 
 ## Current Architecture
 
@@ -44,7 +44,11 @@ Current addendum：context compression now emits structured runtime evidence. `A
 
 Current addendum：EvolutionCat 的 `remember` 是 role-scoped deterministic tool。它复用 `MemoryFinalizer` 的 session-person Markdown 合同，优先按可信 `parentSessionId`、否则按当前 `sessionId` 哈希写入 `memory/sessions/<hash>/MEMORY.md`，返回 canonical ToolResult 和 tool-owned artifact evidence；它不是 Skill，也不会对 Base 或其他角色注册。
 
-Current addendum：每个 `SubAgentSession` 现在写入独立的标准 `logs/sessions/subagent/**/traces.jsonl`。terminal row 保留可信 `parent_session_id`、`subagent_id`、`role_name`、最终选择的 `skill_name`、实际 ToolResult 和 artifact manifest；测试运行显式标记 `environment=test`，使下游夜间采集可以排除 harness evidence。`EvolutionDAGRunner` 直接 `await` 同一套 SubAgentSession，按 Inspector → typed switch 执行，不创建 Base 会话、第二套 Agent loop 或通用 workflow framework。外层 CLI worker 监督整个进程组并保留 PID-owned lock 语义。
+Current addendum：每个 `SubAgentSession` 写入独立的标准 `logs/sessions/subagent/**/traces.jsonl`。terminal row 保留可信 parent、role、skill、ToolResult 和 artifact lineage。`evolution sleep` 已调用轻量 Evolution control workflow，旧 typed-route runner 已删除；Evolution 只组合共享 Test、Eval 与 capability new-Session / code next-process activation。
+
+Current addendum：Case Replay 现在默认使用专用只读 ToolManager，只暴露 `read_file`、`glob` 与 `grep`；正式 Case adapter 还会放入隔离子进程。显式 `workspace_write` Case 只有在 Arena/Evolution clean runtime 设置 enforced sandbox 时才能获得候选工作区的文件与 Shell 工具；delivery、Browser、GUI 和 Secretary 工具始终不注册。Source Candidate Test 复用 macOS Seatbelt：允许读取系统 runtime 与依赖、禁止读取生产源码，并且只允许写候选副本、测试临时目录与一次性 BrowserCat 短 runtime 根；两个会自行创建原生沙箱的 contract test file 单独运行其自身 sandbox，避免无意义的 sandbox nesting。沙箱不可用时 fail closed。
+
+Current addendum：code Finding 通过一次性 `delegate_code` 从 EvolutionCat 路由到 EngineerCat。EngineerCat 仍运行同一个 `SubAgentSession` / `ConversationRunner` loop，只在 secret-free 源码副本内写入。候选完成完整 build、repository tests 和 shared Eval 后，source + dist 以可回滚文件事务替换，并只由下一进程加载；这不是第二套 Agent runtime 或 Candidate lifecycle。
 
 Current addendum：显式配置 `allowedWriteRoot` 的窄 SubAgent workflow 现在同时约束文件写工具和 Shell。`write_file` / `edit_file` 拒绝绝对路径、`..` 与 symlink escape；macOS Shell 通过 Seatbelt 包装，允许广泛读取但只允许写 `allowedWriteRoot`，HOME/TMP 也落在该根目录。Seatbelt 不可用时该受限 Shell fail closed，普通未配置 `allowedWriteRoot` 的 SubAgent 行为不变。EngineerCat 没有独立的内层写控制面，Scheduled Repair 直接在这套共享工具边界内运行。
 
@@ -71,7 +75,7 @@ flowchart LR
         Tools["src/tools"]
         Observability["Observability<br/>local summary + optional OTLP trace"]
         CompactEvidence["compact evidence<br/>event + after snapshot"]
-        EvolutionDAG["EvolutionDAGRunner<br/>fixed route switch"]
+        EvolutionControl["Evolution control<br/>shared Test + Eval"]
         WriteBoundary["SubAgent write boundary<br/>path guard + Seatbelt"]
     end
 
@@ -83,8 +87,8 @@ flowchart LR
     end
 
     SurfaceTurn --> Session
-    EvolutionTrigger --> EvolutionDAG
-    EvolutionDAG --> Subagent
+    EvolutionTrigger --> EvolutionControl
+    EvolutionControl --> Subagent
     Session --> Subagent
     Subagent --> WriteBoundary
     WriteBoundary --> ToolManager
@@ -138,7 +142,8 @@ flowchart LR
         Resolver["ToolVisibilityResolver<br/>role policy + active skill"]
         VisibleTools["provider-visible tool set"]
         Providers["provider adapters<br/>OpenAI / Anthropic / Ollama native"]
-        EvolutionDAG["EvolutionDAGRunner<br/>fixed typed route gate"]
+        EvolutionControl["Evolution control<br/>Trace or Case input"]
+        Activation["Atomic version activation<br/>capability: new Session<br/>code: next process"]
         WriteBoundary["bounded SubAgent writes<br/>path guard + native sandbox"]
     end
 
@@ -161,9 +166,10 @@ flowchart LR
     Policy --> Session
     SurfacePolicy --> Session
     Durable --> Session
-    Scheduled --> EvolutionDAG
-    EvolutionDAG --> Subagent
-    EvolutionDAG --> Trace
+    Scheduled --> EvolutionControl
+    EvolutionControl --> Subagent
+    EvolutionControl --> Trace
+    EvolutionControl --> Activation
     Session --> Trace
     Session --> Subagent
     Subagent --> Trace
@@ -200,7 +206,7 @@ flowchart LR
 - Release-grade runtime evidence can use `tool_result_contract` to require every tool call fact to carry a canonical terminal `status`, require `error_code` on non-success states, require `blocked_reason` for blocked calls, and check `ok` / retry-budget consistency. Curated `session-log-v2` cases that declare `tool_transcript_completeness` should keep this verifier in their owning `test/contract-smoke` or benchmark source, so promoted session fixtures cannot rely on transcript text alone. This is stricter than `runtime_observability`, which remains a compatibility verifier for failure visibility.
 - Provider/model failures that escape the provider call path must become structured runtime evidence: live `AgentSession` writes a `runtime_event:event_type=provider_error` with stable `provider_error.error_code`、`retryable` and session-local budget facts before returning the user-visible fallback. Consecutive same-fingerprint retryable failures must record retry-budget exhaustion and blocked reason; non-retryable provider failures must record immediate blocked evidence. Deterministic failover fixtures must prove provider/endpoint/error_code order and terminal blocked reason until live production-network failover orchestration is stable.
 - The fallback turn for a provider/model failure must also carry degraded provider transcript state-boundary evidence. The provider transcript boundary stays digest-ref-only and must include reason/status/fallback-chain/blocked/raw-payload storage facts, so downstream State/Evidence gates can audit degradation without requiring raw provider request or response retention.
-- Generated eval suite scorecards must retain the source suite hard verifier set. Runtime owns the structured ToolResult/delivery/artifact facts; scorecard regeneration or focused tests must confirm every generated case keeps verifier results for all hard verifiers declared by the source case, preventing stale release scorecards from bypassing newly added runtime contracts.
+- Scripted Runtime Test results must retain every hard verifier declared by their source fixture. Runtime owns structured ToolResult/delivery/artifact facts; generated Test evidence cannot bypass newly added Runtime contracts.
 - Top-level `error_code` describes tool execution failure only. If a successful tool result contains domain-level blocked/path/validation evidence, that evidence must stay in the result payload or artifacts; `SessionTurnLogger` must not hoist it into a success ToolResult's top-level `error_code`.
 - ToolManager 负责三层工具可见性：base tool 受 role 的 `inheritBaseTools`、allowlist、denylist 控制；role tool 由 role registry 注入；surface tool 只在显式 channel-backed surface 上可见。
 - `spawn_subagent` 是 role-aware / no-skill sub-agent dispatch boundary：`role_name` 和 `skill_name` 互斥，但允许二者都不传。只传 `skill_name` 时，子智能体继承父会话当前 role 并预激活该 role 可见 skill；只传 `role_name` 时，有效 role 会在启动前 canonicalize，并用于加载 role prompt、role-local skills 和 role-specific tools，子智能体再通过 `skill` 工具自行选择该 role 的 skill；二者都不传时，子智能体以无预设 skill、无 role dispatch 的后台会话直接按可见工具执行。
@@ -253,4 +259,4 @@ Runtime 需要稳定维护这些结构化事实：
 - 从 `docs/surface/SPEC.md` 接收规范化 user turn 和 callbacks。
 - 从 `docs/roles-skills/SPEC.md` 接收 role prompt、role-scoped tools 和 skill policy。
 - 向 [`../observability-evidence/SPEC.md`](../observability-evidence/SPEC.md) 输出 session logs、runtime events、artifact evidence、trace projection 和 durable state。
-- 由 `test/contract-smoke` 的 deterministic contract smoke 和 `eval/benchmarks/BaseRuntime` 的 release-blocking runtime benchmark cases 分层验证 transcript completeness、failure observability、delivery evidence 和 JSONL compatibility。
+- 由 `test/contract-smoke` 和 `test/scripted-runtime/base-runtime` 分层验证 transcript completeness、failure observability、delivery evidence 和 JSONL compatibility；这些都属于 Test。

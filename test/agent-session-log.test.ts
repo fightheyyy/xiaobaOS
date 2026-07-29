@@ -9,7 +9,7 @@ import { ToolManager } from '../src/tools/tool-manager';
 import { Logger } from '../src/utils/logger';
 import { ChatResponse, Message } from '../src/types';
 import { ToolDefinition } from '../src/types/tool';
-import { runEvalSuite } from '../src/eval/eval-runner';
+import { runScriptedRuntimeTestSuite } from '../src/testing';
 
 class ScriptedAIService {
   constructor(private readonly response: ChatResponse) {}
@@ -357,7 +357,7 @@ describe('AgentSession session log alignment', () => {
     assert.equal(turn.state_boundary.provider_transcript.raw_response_stored, false);
     assert.equal(turn.state_boundary.provider_transcript.raw_payload_stored, false);
 
-    const degradationScorecard = await runEvalSuite({
+    const degradationScorecard = await runScriptedRuntimeTestSuite({
       suitePath: writeLiveProviderDegradationSuite(testRoot, readSessionLogFile(testRoot, 'pet')),
       outDir: path.join(testRoot, 'eval-provider-degradation-output'),
       now: new Date('2026-06-05T00:00:00.000Z'),
@@ -555,7 +555,7 @@ describe('AgentSession session log alignment', () => {
       ],
     }, null, 2) + '\n', 'utf-8');
 
-    const scorecard = await runEvalSuite({
+    const scorecard = await runScriptedRuntimeTestSuite({
       suitePath,
       outDir: path.join(testRoot, 'eval-output'),
       now: new Date('2026-06-04T00:00:00.000Z'),

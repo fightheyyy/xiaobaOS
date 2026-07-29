@@ -1,7 +1,7 @@
 {
   "name": "evolution-cat",
   "displayName": "EvolutionCat",
-  "description": "负责确定性长期记忆、候选能力沉淀，以及 Skill/Role 的显式发布工作流。",
+  "description": "根据 Finding + Case 生成最小 Role、Skill 或 Memory Candidate，并负责用户明确请求的长期记忆；不评测、不激活。",
   "promptFile": "evolution-system-prompt.md",
   "aliases": [
     "evolution",

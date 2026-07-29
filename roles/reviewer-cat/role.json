@@ -1,7 +1,7 @@
 {
   "name": "reviewer-cat",
   "displayName": "Aoi Hachi",
-  "description": "正式回放与独立关闭角色，负责在干净 session 中验收 Inspector Replay Case，并输出 closed/next_run/blocked；工程返工归 EngineerCat。",
+  "description": "共享 Agentic Judge，在独立 Session 中只读审查 Case 的全部 Replay Trace，并按 Oracle 返回结构化 pass/fail/blocked 判断。",
   "promptFile": "reviewer-system-prompt.md",
   "aliases": [
     "reviewer",

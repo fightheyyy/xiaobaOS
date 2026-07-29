@@ -1,7 +1,7 @@
 # Observability & Evidence PLAN
 
 状态：Active
-最后更新：2026-07-22
+最后更新：2026-07-29
 Owner：Runtime / evidence maintainers
 
 ## Current Status
@@ -45,7 +45,7 @@ flowchart LR
 - Define local retention and user-controlled deletion without altering faithful trace semantics.
 - Add durable parent/child/action receipts needed for crash recovery.
 - Keep raw provider payload and full pre-compaction snapshots opt-in rather than default.
-- Keep benchmark admission manual and Evaluation-owned.
+- Keep Case creation and long-lived CaseSet admission outside Observability.
 
 ## Owners
 
@@ -73,6 +73,6 @@ flowchart LR
 ## Recent Verification
 
 - OTel focused tests cover parent/child ids, incoming W3C ancestry, resource identity, string allowlist privacy, real loopback OTLP/HTTP protobuf delivery, header decoding, invalid endpoints and unavailable-collector fail-open behavior.
-- Full repository tests pass 625/625 across 97 suites；`npm run build` and `git diff --check` pass.
+- Full repository tests pass 556/556 across 100 suites；`npm run build` passes.
 - Deterministic harvest tests cover timestamp windows across date directories, malformed/non-terminal rows, test/replay/self-run exclusion, runtime-stamped custom replay provenance, stable observation ids and atomic reruns.
 - Real harvest for `2026-07-13` scanned 124 trace files, excluded 44 synthetic/replay rows and correctly returned 0 production observations / 0 patterns.

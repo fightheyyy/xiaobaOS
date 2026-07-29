@@ -167,58 +167,25 @@ describe('ToolManager role-specific tools', () => {
     assert.ok(!result.artifact_manifest?.some(item => item.metadata?.inferred === true));
   });
 
-  test('reviewer-cat 只注册正式回放工具，不暴露实现控制', () => {
+  test('reviewer-cat has no private evaluator or replay tools', () => {
     RoleResolver.activateRole('reviewer-cat');
     const manager = createRoleAwareToolManager();
-    assert.ok(manager.getTool('reviewer_eval_prepare'));
-    assert.ok(manager.getTool('reviewer_trace_replay'));
-    assert.ok(manager.getTool('reviewer_xiaoba_cli_e2e'));
-    assert.ok(manager.getTool('reviewer_module_test'));
+    assert.strictEqual(manager.getTool('reviewer_trace_replay'), undefined);
+    assert.strictEqual(manager.getTool('reviewer_eval_prepare'), undefined);
+    assert.strictEqual(manager.getTool('reviewer_xiaoba_cli_e2e'), undefined);
+    assert.strictEqual(manager.getTool('reviewer_module_test'), undefined);
     assert.strictEqual(manager.getTool('engineer_task_run'), undefined);
     assert.strictEqual(manager.getTool('codex_job_start'), undefined);
   });
 
-  test('evolution DAG runtime hard-blocks Reviewer command runners', async () => {
+  test('Reviewer command runners are absent instead of policy-blocked', () => {
     RoleResolver.activateRole('reviewer-cat');
-    const e2eSentinel = path.join(testRoot, 'dag-e2e-mutated');
-    const moduleSentinel = path.join(testRoot, 'dag-module-mutated');
     const manager = createRoleAwareToolManager(testRoot, {
       roleName: 'reviewer-cat',
       parentSessionId: 'evolution:dag:2026-07-14',
     });
-
-    const e2e = await manager.executeTool({
-      id: 'dag-e2e-denied',
-      type: 'function',
-      function: {
-        name: 'reviewer_xiaoba_cli_e2e',
-        arguments: JSON.stringify({
-          command: `node -e "require('fs').writeFileSync(${JSON.stringify(e2eSentinel)}, 'bad')"`,
-          messages: ['修改代码'],
-          verifier_commands: [{ command: 'exit 0' }],
-        }),
-      },
-    });
-    const module = await manager.executeTool({
-      id: 'dag-module-denied',
-      type: 'function',
-      function: {
-        name: 'reviewer_module_test',
-        arguments: JSON.stringify({
-          module: 'custom',
-          tests: [{
-            command: `node -e "require('fs').writeFileSync(${JSON.stringify(moduleSentinel)}, 'bad')"`,
-          }],
-        }),
-      },
-    });
-
-    assert.strictEqual(e2e.status, 'blocked');
-    assert.strictEqual(e2e.error_code, 'REVIEWER_ARBITRARY_E2E_FORBIDDEN_IN_EVOLUTION_DAG');
-    assert.strictEqual(module.status, 'blocked');
-    assert.strictEqual(module.error_code, 'REVIEWER_COMMAND_RUNNER_FORBIDDEN_IN_EVOLUTION_DAG');
-    assert.strictEqual(fs.existsSync(e2eSentinel), false);
-    assert.strictEqual(fs.existsSync(moduleSentinel), false);
+    assert.strictEqual(manager.getTool('reviewer_xiaoba_cli_e2e'), undefined);
+    assert.strictEqual(manager.getTool('reviewer_module_test'), undefined);
   });
 
   test('engineer-cat 只开放 coding 和 skill 工具且没有调度控制面', () => {
@@ -344,76 +311,6 @@ describe('ToolManager role-specific tools', () => {
 
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.content, 'engineer-cat');
-  });
-
-  test('reviewer-cat eval prepare 工具能通过 ToolManager 执行并落盘评估工件', async () => {
-    RoleResolver.activateRole('reviewer-cat');
-    fs.writeFileSync(
-      path.join(testRoot, 'package.json'),
-      JSON.stringify({ scripts: { test: 'node --test' } }, null, 2),
-      'utf-8',
-    );
-
-    const manager = createRoleAwareToolManager(testRoot);
-    const result = await manager.executeTool({
-      id: 'eval-prepare-1',
-      type: 'function',
-      function: {
-        name: 'reviewer_eval_prepare',
-        arguments: JSON.stringify({
-          review_id: 'runtime-channel',
-          request: 'Verify reviewer eval runtime channel.',
-          changed_files: ['src/example.ts'],
-        }),
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    assert.match(String(result.content), /reviewer_eval_prepare: status=prepared/);
-    assert.ok(fs.existsSync(path.join(testRoot, 'data', 'reviewer-runs', 'runtime-channel', 'review-eval-plan.md')));
-    assert.ok(fs.existsSync(path.join(testRoot, 'data', 'reviewer-runs', 'runtime-channel', 'test-matrix.md')));
-    assert.deepEqual((result.artifact_manifest ?? []).map(item => item.path), [
-      'data/reviewer-runs/runtime-channel/task.json',
-      'data/reviewer-runs/runtime-channel/evaluation-profile.md',
-      'data/reviewer-runs/runtime-channel/evaluation-profile.json',
-      'data/reviewer-runs/runtime-channel/review-eval-plan.md',
-      'data/reviewer-runs/runtime-channel/boundary-map.md',
-      'data/reviewer-runs/runtime-channel/test-matrix.md',
-      'data/reviewer-runs/runtime-channel/summary.json',
-    ]);
-    assert.ok(result.artifact_manifest?.every(item => item.action === 'generated'));
-    assert.ok(result.artifact_manifest?.every(item => item.metadata?.source === 'tool_owned'));
-    assert.ok(!result.artifact_manifest?.some(item => item.metadata?.inferred === true));
-  });
-
-  test('reviewer-cat module test 工具显式声明 report 和 log 产物', async () => {
-    RoleResolver.activateRole('reviewer-cat');
-    const manager = createRoleAwareToolManager(testRoot);
-    const result = await manager.executeTool({
-      id: 'module-test-manifest-1',
-      type: 'function',
-      function: {
-        name: 'reviewer_module_test',
-        arguments: JSON.stringify({
-          run_id: 'manifest-module',
-          module: 'custom',
-          tests: [
-            { name: 'ok', command: 'node -e "console.log(42)"' },
-          ],
-        }),
-      },
-    });
-
-    assert.strictEqual(result.ok, true);
-    assert.match(String(result.content), /reviewer_module_test: status=passed/);
-    assert.deepEqual((result.artifact_manifest ?? []).map(item => item.path), [
-      'data/reviewer-module-tests/manifest-module/report.json',
-      'data/reviewer-module-tests/manifest-module/01-ok.stdout.log',
-      'data/reviewer-module-tests/manifest-module/01-ok.stderr.log',
-    ]);
-    assert.ok(result.artifact_manifest?.every(item => item.action === 'generated'));
-    assert.ok(result.artifact_manifest?.every(item => item.metadata?.source === 'tool_owned'));
-    assert.ok(!result.artifact_manifest?.some(item => item.metadata?.inferred === true));
   });
 
   test('role text tool outputs produce inferred artifact manifests', async () => {

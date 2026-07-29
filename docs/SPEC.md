@@ -1,7 +1,7 @@
 # XiaoBa-CLI SPEC
 
 状态：Active
-最后更新：2026-07-22
+最后更新：2026-07-29
 适用范围：`XiaoBa-CLI` 整体架构、agent harness 边界、核心状态机、运行证据和评测闭环。
 
 本文是 `XiaoBa-CLI` 的项目级架构真相源。项目只维护本文和六个模块 SPEC；角色、benchmark、desktop、test 和实验实现不再各自复制架构文档。
@@ -16,14 +16,14 @@ XiaoBa-CLI 的稳定文档结构是一个项目级大 SPEC 加六个顶层模块
 | Agent Runtime：会话与工具编排层 | [`agent-runtime/SPEC.md`](agent-runtime/SPEC.md) | [`agent-runtime/PLAN.md`](agent-runtime/PLAN.md) | `src/core`、`src/providers`、`src/tools`、runtime 类型、session lifecycle 和 agent loop |
 | Roles & Skills：Base + 八角色策略层 | [`roles-skills/SPEC.md`](roles-skills/SPEC.md) | [`roles-skills/PLAN.md`](roles-skills/PLAN.md) | Base Main Agent、八个默认 Role Subagent、`roles`、`src/roles`、`skills`、`src/skills` |
 | Observability & Evidence：观测证据层 | [`observability-evidence/SPEC.md`](observability-evidence/SPEC.md) | [`observability-evidence/PLAN.md`](observability-evidence/PLAN.md) | `src/observability`、`logs`、`data`、`memory`、`output`、trace projection 和 artifact evidence |
-| Evaluation：trace replay + live agent eval 层 | [`evaluation/SPEC.md`](evaluation/SPEC.md) | [`evaluation/PLAN.md`](evaluation/PLAN.md) | `src/replay`、`scripts/run-trace-replay.ts`、`eval`、`eval/benchmarks`、BaseRuntime live agent eval、hard verifiers、scorecard 和工程测试 |
-| Arena：候选能力验收场 | [`arena/SPEC.md`](arena/SPEC.md) | [`arena/PLAN.md`](arena/PLAN.md) | `src/arena`、`src/commands/arena.ts`、root `arena`、subject import、clean runtime、sandboxed runner、scorecard 和显式 promotion |
+| Evaluation：Test 与 Agent Eval | [`evaluation/SPEC.md`](evaluation/SPEC.md) | [`evaluation/PLAN.md`](evaluation/PLAN.md) | `src/testing`、`test/scripted-runtime`、`src/replay`、`src/eval`、Case Replay、Verifier、ReviewerCat Judge |
+| Arena：Agentic Eval 工作流 | [`arena/SPEC.md`](arena/SPEC.md) | [`arena/PLAN.md`](arena/PLAN.md) | Scenario、UserCat、Subject Trace、InspectorCat Finding+Case 与 shared Eval |
 
-本地 JSONL、artifact evidence 和 role/runtime scorecard 始终是权威事实。Observability 允许显式启用一个脱敏、fail-open 的 OTLP trace 投影，供 Barena、Scenario 或 APM collector 消费；该投影不拥有 pass/fail，也不能自动接受生成的 benchmark candidate。
+本地 JSONL 和 artifact evidence 是运行事实；Outcome 是一次 Case execution 的唯一裁决；EvaluationResult、ArenaResult 和 Report 都不能再创造第二份真相。Observability 允许显式启用脱敏、fail-open 的 OTLP trace 投影，但该投影不拥有 pass/fail。
 
 ## 1. 核心定位
 
-XiaoBa-CLI 是一个本地优先、message-native、可治理自进化的 agent harness runtime。它的核心不是把 LLM 接到几个工具上，也不是只让 agent 沉淀更多 skill；而是把模型、工具、角色、skill、memory、context、artifact、日志、replay 和 Arena review gate 组织成一个可控、可观测、可恢复、可评测的运行时状态机，让每次成长都能被证据验收。
+XiaoBa-CLI 是一个本地优先、message-native、可治理自进化的 agent harness runtime。它把模型、工具、角色、Skill、memory、context、artifact、Trace、Test、Eval 和 Arena 组织成一个可控、可观测、可恢复的运行时。
 
 关键判断：
 
@@ -53,7 +53,7 @@ Harness is the runtime.
 - artifact 生成与发送必须有 evidence。
 - 日志必须可解析、可投影、可 replay。
 - 失败必须能归因到 runtime、skill、role 或外部系统。
-- self-evolution 产出的 skill / role 变更必须先被视为候选能力；只有绑定完整 trace/replay、Arena scorecard、全轮硬合同（若声明）、不可变 subject fingerprint 与人工确认的 runtime Promote，才能从 Arena snapshot 进入生产资产。
+- self-evolution 产出的变更先形成 immutable Candidate artifact；Candidate 复用 shared Test + Eval，通过后按 capability 新 Session / code 下一进程边界原子激活，失败或 blocked 不改变当前版本。
 
 ## Current Architecture
 
@@ -77,84 +77,71 @@ flowchart LR
     end
     subgraph Learn["4) Verify / improve"]
         direction TB
-        Evaluation["Evaluation<br/>tests / replay / live eval"]
-        Improve["Scheduled workflow<br/>Inspector-first routes"]
+        Test["Test<br/>implementation correctness"]
+        Evaluation["Evaluation<br/>Case Replay + Judge"]
+        Improve["Evolution<br/>shared Test + Eval + atomic activation"]
     end
-    subgraph Review["5) Review"]
+    subgraph Review["5) Explore"]
         direction TB
-        Arena["Arena<br/>immutable subject + scorecard"]
-    end
-    subgraph Release["6) Release"]
-        direction TB
-        Promote["Explicit CLI Promote<br/>human confirmation + receipt"]
-        Production["Production assets<br/>active Skill / Role"]
-        Promote --> Production
+        Arena["Arena<br/>Scenario + clean runtime + shared Eval"]
     end
 
     Surface --> Runtime
     Policy --> Runtime
     Runtime --> Evidence
     Evidence --> Otel
+    Runtime --> Test
     Evidence --> Evaluation
     Evidence --> Improve
     Runtime --> Arena
     Policy --> Arena
     Evidence --> Arena
-    Improve --> Arena
-    Arena -. "passed snapshot" .-> Promote
-    Surface -. "human command" .-> Promote
+    Test --> Improve
+    Evaluation --> Improve
 ```
 
 ## Target Architecture
 
-目标架构保持同一套本地优先 runtime，但把 surface、policy、tool boundary、state/evidence 和 evaluation gate 分层收敛。项目层只约束模块关系；模块内部的类、工具和数据结构由各自 `SPEC.md` 继续展开。
+目标架构保留同一套本地优先 Runtime，把质量体系收敛为四条共享
+Evidence Primitive 的轻量工作流。`Assurance` 是这套关系的名称，不是新
+module、service 或 runner。Scenario 用于开放探索，Trace 保存运行事实，
+Case 把问题变成可执行实验，Outcome 是一次真实执行的唯一裁决。
 
 ```mermaid
 flowchart LR
-    subgraph Entry["1) Surface"]
-        direction TB
-        Surface["One surface contract<br/>CLI / IM / Pet / Dashboard"]
-    end
-    subgraph Harness["2) Harness"]
-        direction TB
-        Runtime["Agent Runtime<br/>one shared loop"]
-        Policy["Roles & Skills<br/>owned policy + typed adapters"]
-    end
-    subgraph State["3) Capability / facts"]
-        direction TB
-        Drivers["Deterministic drivers<br/>browser / GUI / lark-cli"]
-        Evidence["Observability & Evidence<br/>local source of truth"]
-        Otel["OTLP trace projection<br/>optional + redacted"]
-    end
-    subgraph Improve["4) Verify / improve"]
-        direction TB
-        Evaluation["Evaluation<br/>replay + live gates"]
-        Workflow["Continuous improvement DAG<br/>Inspector diagnose + route"]
-    end
-    subgraph Review["5) Review"]
-        direction TB
-        Arena["Arena<br/>isolated candidate evaluation"]
-    end
-    subgraph Release["6) Release"]
-        direction TB
-        Gate["Human Promote gate<br/>exact snapshot + provenance"]
-        Production["Production capability"]
-        Gate --> Production
-    end
+    Surface["Surface<br/>CLI / IM / Pet / Dashboard"] --> Runtime["Agent Runtime<br/>one shared loop"]
+    Roles["Roles & Skills<br/>8 shared Roles"] --> Runtime
+    Runtime --> Trace["Trace<br/>shared runtime evidence"]
 
-    Surface --> Runtime
-    Policy --> Runtime
-    Runtime --> Drivers
-    Runtime --> Evidence
-    Evidence --> Otel
-    Evidence --> Evaluation
-    Evidence --> Workflow
-    Policy --> Arena
-    Evidence --> Arena
-    Workflow --> Arena
-    Arena -. "pass only" .-> Gate
-    Surface -. "human command" .-> Gate
+    Test["Test<br/>implementation correctness"] --> TestResult["TestResult"]
+    Case["Case + Oracle"] --> Eval["Eval<br/>Replay + Judge"]
+    Eval --> Outcome["Outcome<br/>pass / fail / blocked"]
+
+    Scenario["Scenario"] --> Arena["Arena<br/>UserCat + Inspector"]
+    Arena --> Case
+
+    Trace --> Evolution["Evolution<br/>async control DAG"]
+    Outcome --> Evolution
+    Evolution --> Candidate["Candidate<br/>code or capability"]
+    Candidate --> Test
+    Candidate --> Eval
+    TestResult --> Activate["Activate on pass<br/>next Session only"]
+    Outcome --> Activate
 ```
+
+这四条工作流的稳定边界是：
+
+- Test 验证代码、Runtime、Tool、协议和安全约束；预写模型响应的真实
+  Runtime 执行属于 Scripted Runtime Test，不属于 Agent Eval。
+- Eval 只执行 Case：Replay 驱动真实 Agent 产生新 Trace，Verifier 先做硬
+  检查，通过后 ReviewerCat 依据 Oracle 作语义裁决；EvaluationResult 只
+  聚合事实，不再产生第二套总裁决。
+- Arena 从 Scenario 开始。UserCat 与 Subject 产生普通 Trace，InspectorCat
+  只产出零个或多个 `Finding + Case` 对；Case 进入共享 Eval。Arena 不拥有
+  Replay、Judge 或 Scorecard 实现，也不直接给 Scenario Trace 生成 Outcome。
+- Evolution 可以从 Trace 或失败 Case 开始，但 Repair 前必须已有可 Replay
+  Case。EngineerCat 修改代码，EvolutionCat 修改 Role / Skill / Memory；
+  Candidate 复用 Test + Eval，通过后按 capability 新 Session / code 下一进程边界自动激活。
 
 ## 核心组件边界
 
@@ -165,44 +152,23 @@ flowchart LR
 | `ToolManager` | 管三层工具注册、可见性、参数解析、执行边界、结果归一化、错误码和 retryable 信号；工具层级包括 base tool、role tool 和 surface tool | 不参与模型推理；不维护多轮对话状态；不把平台交付工具伪装成角色工具 |
 | `ContextCompressor` | 管长上下文状态迁移，在压缩后保留任务目标、约束、artifact 状态和最近上下文 | 不做业务总结；不替代 memory |
 | `SessionTurnLogger` | 管运行证据：trace、legacy turn alias、tool call、tool result、tokens、embedded runtime events、artifact clues；`traces.jsonl` append 后投影到 observability local summary，普通 runtime 文本写入 `runtime.log` | 不做最终质量评分；不作为业务数据库 |
-| `Observability` | 管 session log 投影后的 local summary、本地 span/metric helper、hash-only trace continuity，以及可选的脱敏 OTLP trace 投影 | 不替代本地 JSONL、artifact evidence、scorecard；不直接拥有 runtime 事实源；不拥有 pass/fail；不接受、patch 或 apply benchmark case；不外发 prompt/tool/file 内容 |
+| `Observability` | 管 session log 投影后的 local summary、本地 span/metric helper、hash-only trace continuity，以及可选的脱敏 OTLP trace 投影 | 不替代本地 JSONL、artifact evidence 或 canonical Result；不拥有 pass/fail；不创建或修改 Case；不外发 prompt/tool/file 内容 |
 | `roles/*` | 定义角色身份、职责、工具注入和验收边界 | 不复制 runtime loop |
 | `skills/*` | 定义领域流程和操作策略 | 不保存 runtime 状态；不绕过工具边界 |
-| `Arena` | 管 GitHub skill 导入、本地 role 验收、三种 capability review mode、clean runtime overlay、轻量 execution sandbox、subject manifest、scorecard、声明式逐轮硬合同、内容寻址 Patch Candidate 的 `repair_regression` 多次复跑和 promotion receipt 边界 | 不自动信任或晋升 subject；不把 Patch 伪装成 Skill/Role subject；不替代生产 `SkillManager` 或 role registry；不复制 runtime trace / eval benchmark source；不自动接受 benchmark case；不要求 Docker / VM |
-| `test/*` | 定义代码正确性、集成测试和 deterministic runtime contract smoke | 不承载 live agent eval benchmark；不保存 eval scorecard policy |
-| `src/replay/*` | 定义历史 trace replay：从本地 `traces.jsonl` 抽用户输入，重新驱动当前 runtime，产生 fresh trace 和轻量对比 | 不打 benchmark 分；不自动接受 eval case；不上传或脱敏本地 trace |
-| `eval/*` | 只定义 live agent eval：curated benchmark input、setup、runtime replay、tool/result verifier 和 scorecard | 不保存原始私密 trace；不承载普通单测；不保存 schema/contract/rubric governance；不收静态 JSONL regression |
-| `eval/benchmarks/*` | 存放 live agent eval benchmark source、suite、case mapping | 不保存原始私密 trace；不承载普通单测；不保存非 live role/static fixtures |
+| `Arena` | 从 Scenario 开始，让 UserCat 与 Subject 产生普通 Trace，再由 InspectorCat 生成 Finding+Case 并调用 shared Eval | 不拥有 Replay、Judge、Scorecard、Regression 或 Candidate activation |
+| `test/*`, `src/testing/*` | 定义代码正确性、集成测试、contract smoke 和 Scripted Runtime Test | 不把预写模型响应当成 Agent 行为能力 |
+| `src/replay/*` | 执行 Case 或兼容历史 Trace 输入，驱动当前 Runtime 并产生 fresh Trace | 不输出 pass/fail；不做 Judge |
+| `src/eval/*` public API | 定义 Case、Oracle、Outcome、EvaluationResult 和 ReviewerCat Judge | 不保存第二套 overall verdict；不拥有 Arena 或 Evolution |
 
 ## Agent Loop 状态机
 
 Agent harness 的核心是状态机，不是单次请求。
 
-```mermaid
-flowchart LR
-    UserMessage["user message"]
-    Prepare["prepare context<br/>role / skill / memory / budget"]
-    ProviderRequest["provider request"]
-    AssistantDecision["assistant decision<br/>text or tool_calls"]
-    ToolExecution["tool execution"]
-    ToolResult["tool result<br/>success / failure / timeout / cancelled / blocked"]
-    TranscriptUpdate["transcript update"]
-    FinalReply["final reply / artifact delivery"]
-    Evidence["session JSONL / metrics / artifacts"]
-    Failure["observable failure<br/>error_code / blocked reason"]
-
-    UserMessage --> Prepare
-    Prepare --> ProviderRequest
-    ProviderRequest --> AssistantDecision
-    AssistantDecision -- "no tool calls" --> FinalReply
-    AssistantDecision -- "tool calls" --> ToolExecution
-    ToolExecution --> ToolResult
-    ToolResult --> TranscriptUpdate
-    TranscriptUpdate --> ProviderRequest
-    ToolExecution -- "throw / timeout / cancel" --> Failure
-    Failure --> TranscriptUpdate
-    FinalReply --> Evidence
-    TranscriptUpdate --> Evidence
+```text
+user message -> prepare context -> provider request -> assistant decision
+                                      ^                    |
+                                      |                    +-> final reply / delivery
+                                      +-- transcript <- tool result <- tool execution
 ```
 
 状态机不变量：
@@ -221,7 +187,7 @@ XiaoBa 的状态不能只用一个 `messages[]` 描述。需要区分三层：
 | 层 | 内容 | 作用 |
 | --- | --- | --- |
 | Durable Session | surface、session key、`data/sessions/<surface>` 持久化上下文、active skill、按需读取的长期 memory 笔记 | 跨 trace / restart 恢复 |
-| Trace | 当前用户请求的 user input、runner turns、tool calls、tool results、artifacts、runtime events | debug、replay、scorecard 证据 |
+| Trace | 当前用户请求的 user input、runner turns、tool calls、tool results、artifacts、runtime events | debug、Replay、Test/Eval 证据 |
 | Provider Transcript | 真正发送给模型 provider 的 system/user/assistant/tool messages | 保证 provider 协议合法和 token budget |
 
 设计原则：
@@ -229,7 +195,7 @@ XiaoBa 的状态不能只用一个 `messages[]` 描述。需要区分三层：
 - Durable session 不能直接等同于 provider transcript。
 - Trace 是事实证据，不一定全部进入下一次 provider request。
 - Context compression 应该迁移状态，而不是简单裁剪文本。
-- Session log 是 replay/eval 的输入资产；新写入应带 `trace_id` / `trace_index`，而 `case_id`、`scorecard` 属于后处理或评测产物。
+- Session log 是 Replay/Eval 的输入资产；新写入应带 `trace_id` / `trace_index`，而 `case_id` 与 Outcome 属于后处理或评测产物。
 
 ## Memory Contract
 
@@ -280,13 +246,13 @@ Skill 是 instruction pack，用于注入领域流程和工作策略。Skill 不
 - 默认 GitHub/package role set 包含 `user-cat`、`inspector-cat`、`engineer-cat`、`reviewer-cat`、`browser-cat`、`gui-cat`、`secretary-cat`、`evolution-cat`。
 - 非默认 role 必须通过显式安装、Role Hub 或本地 ignored 资产进入，不属于默认跟踪资产。
 - `engineer-cat`：实现修复和工程交付。
-- `reviewer-cat`：复跑、验收、证据判断，并以 `closed / next_run / blocked` 结束单 case 正式回放。
-- `inspector-cat`：runtime triage、evidence forensics、issue profile、handoff routing、skill/benchmark 机会挖掘。
-- `user-cat`：真实端到端低质量用户使用与候选 trace pressure。
+- `reviewer-cat`：共享 Agentic Judge；在独立只读 Session 中依据 Case Oracle 和全部 relevant Traces 返回结构化 decision。
+- `inspector-cat`：只把 Trace 中的问题变成 0..n 个有证据的 Finding + executable Case。
+- `user-cat`：窄职责真实用户模拟；在 Arena 中与 Subject 自然互动；缺少 Scenario 时可以只生成一个小 Scenario seed。
 - `browser-cat`：只通过类型化 BrowserAdapter 操作隔离浏览器 session；role-local `core` Skill 是与固定 `agent-browser` 版本匹配的官方文件原样 vendored 副本，但不能扩大 ToolManager 权限；网页内容视为不可信输入。
 - `gui-cat`：只通过类型化 GuiAdapter 操作 macOS GUI；role-local `peekaboo` Skill 是官方文件的原样 vendored 副本，但 Skill 文字不能扩大 ToolManager 权限，实际仍只能调用可见的 `gui_*` 工具；共享桌面必须有全局 lease、风险分层和动作证据。
 - `secretary-cat`：复用官方 `lark-cli` 的飞书能力；`FeishuCat` 是别名，XiaoBa 只增加角色、确认、交付和 evidence 边界。
-- `evolution-cat`：通过确定性 `remember` role tool 写 session-person 长期记忆，并独占 `self-evolution`、`skill-publish`、`role-publish` role-local Skills；代码和评测仍归 EngineerCat / ReviewerCat / Arena。
+- `evolution-cat`：通过确定性 `remember` 写 session-person 长期记忆，并生成 Role、Skill 或 Memory Candidate；代码归 EngineerCat，验收统一复用 Test + Eval。
 - Base 负责用户对话并直接按 role 派遣专业角色，默认 Skill inventory 为 0；浏览器任务直接进入 BrowserCat，不保留重复的 Base agent-browser 路由 Skill；所有角色继续复用同一个 Agent Runtime。
 
 ## Evidence And Logging
@@ -337,54 +303,39 @@ logs/sessions/<surface>/<date>/<session_id>/
 
 ## Evaluation System
 
-XiaoBa 的评测现在只保留两层 eval 加一套观测证据系统。
+XiaoBa 只保留 Test 与 Eval 两种质量语义：
 
 ```text
-Quality System
-├── Test Harness
-│   ├── unit / integration
-│   └── contract smoke
-├── Eval / Benchmark
-│   ├── BaseRuntime benchmark
-│   └── role eval / benchmark
-└── Observability Evidence System
+Test = Implementation Correctness
+Eval = Agent Behavioral Capability
+Trace = shared runtime evidence
+Case = shared executable input
+Replay = execute Case and produce a fresh Trace
 ```
 
-`test/` 维护代码正确性和 deterministic contract smoke：unit / integration tests 在 `test/**/*.test.ts`，runtime contract smoke 在 `test/contract-smoke/suites` 和 `test/contract-smoke/fixtures`。`src/replay` / `xiaoba replay --trace` 维护历史 trace replay：输入本地 `traces.jsonl`，抽取真实用户输入，重新驱动当前 runtime 并生成 fresh trace 对比。`eval/` 只维护 live agent eval benchmark：curated 输入请求 + setup + runtime replay + tool/result verifier + scorecard。`Arena` 是候选能力验收场，不属于 `eval/`；它的 run 可以启发未来 live eval case，但必须人工重写后才能进入 `eval/benchmarks`。`check:benchmarks` 只验证 live benchmark manifest、case id 和 referenced suite。`eval/benchmarks/BaseRuntime/` 是当前唯一 live eval benchmark root，包含 11 条 Pet/IM runtime replay cases。`eval:gate` 默认只聚合这套 live BaseRuntime eval。
+Test 包含 unit、integration、contract smoke 和 Scripted Runtime Test。后者可以让真实 Runtime 执行预写模型动作，但产物只能叫 TestResult。当前 BaseRuntime 11 条用例已迁到 `test/scripted-runtime/base-runtime`，命令是 `test:base-runtime`。
 
-Live runtime alignment：`AgentSession` provider failure fallback turns now emit the same degraded provider transcript boundary facts required by the deterministic State/Evidence gate, while production-network provider replay remains a later E2E layer.
-
-Provider-network readiness alignment：provider-network readiness remains an opt-in diagnostic script for real provider credentials, outside the public `eval:*` command surface.
-
-Historical output alignment：old generated `output/**` roots are not current observability source-of-truth unless an owner explicitly moves them into a maintained check or live eval source.
-
-三类 case 来源：
-
-- Test harness case：从 contract、JSONL、provider、surface runtime、state/evidence 和 resilience 不变量构造稳定 smoke，归 `test/contract-smoke`。
-- Trace replay：从历史 `traces.jsonl` 抽取真实用户输入，重新跑当前 runtime，观察 fresh trace 是否还能复现同类行为。
-- Live agent eval case：从 curated 用户输入、setup、replay、expected tool/result 和 verifier 构造可重新运行的 benchmark 行为评测。
-- Observability evidence：从 trace / event / metric / artifact 生成可审证据，可辅助定位和候选 case 设计，但不自动接受为 benchmark。
-
-评估顺序：
+Eval 的固定顺序：
 
 ```text
-contract hard gate
-  -> runtime harness replay or role benchmark replay
-  -> hard gate verifier
-  -> role/domain verifier when owned by a role benchmark
-  -> deterministic soft judge
-  -> LLM / VLM judge
-  -> human review for high-value or disputed cases
-  -> quality / efficiency scorecard
+Case + Oracle
+  -> Replay real Agent
+  -> fresh Trace
+  -> Verifier hard checks
+  -> ReviewerCat semantic Judge
+  -> one Outcome: pass | fail | blocked
+  -> EvaluationResult facts
 ```
 
-质量原则：
+Verifier hard failure 直接形成 Outcome。通过硬检查的运行由 ReviewerCat 在 fresh、只读、结构化 Session 中判断；一次 Judge 可以看到同一 Case 的全部 runs。Report 只展示 canonical Result。
 
-- contract fail 直接 block。
-- 必需 artifact 缺失直接 fail。
-- provider payload boundary 或必需 evidence 违规直接 fail。
-- quality 先过门槛，efficiency 再排序。
-- LLM/VLM judge 只做语义评估和初筛，不能替代程序化 evidence。
+Arena 从 Scenario 探索未知问题，InspectorCat 把问题回归成 Case，再调用同一个 Eval。Evolution 从 Trace 或 Case 生成 Candidate，也调用同一个 Test + Eval。三者不复制 Replay、Judge、Scorecard 或 Regression。
+
+真实 CaseSet 的 `xiaoba eval run`、Arena clean-runtime 默认链和 nightly Evolution 都已接入共享核心。维护中的 `xiaoba-core-readonly-v1` 提供首批 Base / EngineerCat / ReviewerCat 行为 Case；Case Replay 默认只暴露读取工具，只有显式 `workspace_write` Case 才能在 enforced clean runtime 中获得候选工作区写工具，外部消息、Browser、GUI 和 Secretary 工具始终不进入 Replay。
+
+source-code Finding 现在由 EvolutionCat 返回一次性 `delegate_code`，再由共享 Agent loop 中的 EngineerCat 修改隔离源码副本。Source Candidate 在同一副本中完成完整 Test 和 shared Eval，只有通过的 source + dist 才事务性替换生产版本并于下一进程生效；Role/Skill Candidate 仍于新 Session 生效。这个委派不是新状态机或第二条工作流。
+
+旧 Arena scorecard worker、typed Evolution DAG、manual promotion、patch regression 及其专用 Reviewer replay Tool 已删除；subject snapshot 与 clean runtime 只作为隔离 adapter 保留。
 
 ## Agent Harness Contracts
 
@@ -393,7 +344,7 @@ contract hard gate
 - Transcript completeness：每个 tool call 必须有 matching tool result。
 - Failure observability：timeout、cancelled、throw 必须转成可观测 `status/error_code`。
 - Retry budget：失败重试必须有上限，重复失败后要变更策略或报告 blocked reason。
-- Privacy boundary：reply、log、artifact、scorecard 不得泄漏 credential、token、私有 host；release JSONL fixtures 和 artifact fixtures 在进入 eval evidence 前必须通过隐私预检；`data/sessions` durable restore store 属于私有恢复状态，不等同于可发布 evidence。
+- Privacy boundary：reply、log、artifact、Result/Report 不得泄漏 credential、token、私有 host；release fixtures 在进入共享 Test/Eval evidence 前必须通过隐私预检；`data/sessions` durable restore store 属于私有恢复状态，不等同于可发布 evidence。
 - Artifact evidence：生成、更新、发送用户文件必须有 manifest 或 delivery evidence。
 - Context continuity：restore/compaction 后保留当前任务目标、硬约束、关键路径和 artifact 状态。
 - JSONL compatibility：session log 必须逐行可解析，schema 变更必须兼容 ingestion；release suite `inputs.jsonl` 必须声明 `session-log-v2` schema 或 explicit non-session contract，且 non-session contract 必须有 dedicated shape + semantic gate。

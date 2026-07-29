@@ -17,7 +17,6 @@ describe('registerArenaCommand', () => {
     testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoba-arena-command-'));
     process.chdir(testRoot);
     writeSkill(path.join(testRoot, 'skills', 'demo-skill'), 'demo-skill');
-    writeEvidenceRefs(testRoot);
     originalLog = console.log;
     logs = [];
     console.log = (...args: unknown[]) => {
@@ -51,59 +50,38 @@ describe('registerArenaCommand', () => {
     )));
   });
 
-  test('registers arena run create command with real evidence refs', async () => {
-    const importProgram = createProgram();
-    registerArenaCommand(importProgram);
-    await importProgram.parseAsync(['node', 'xiaoba', 'arena', 'import', 'skill', 'skills/demo-skill']);
-    const manifest = JSON.parse(logs.join('\n'));
-    logs = [];
+  test('registers a credential-free Barena live contract command', async () => {
+    const program = createProgram();
+    registerArenaCommand(program);
 
-    const runProgram = createProgram();
-    registerArenaCommand(runProgram);
-    await runProgram.parseAsync([
-      'node',
-      'xiaoba',
-      'arena',
-      'run',
-      'create',
-      '--mode',
-      'base_skill',
-      '--subject',
-      manifest.subject_id,
-      '--run-id',
-      'cli-pass',
-      '--usercat-run',
-      'usercat-cli',
-      '--usercat-package',
-      'output/user-cat/candidates/usercat-cli/manifest.json',
-      '--trace',
-      'logs/sessions/pet/2026-06-29/session/traces.jsonl',
-      '--inspector',
-      'output/inspector/cli-case.json',
-      '--reviewer-run',
-      'reviewer-cli',
-      '--scorecard',
-      'data/reviewer-runs/reviewer-cli/scorecard.json',
-      '--report',
-      'data/reviewer-runs/reviewer-cli/report.md',
-      '--decision',
-      'pass',
-      '--attempts-planned',
-      '3',
-      '--attempts-completed',
-      '3',
-      '--attempts-pass',
-      '3',
-      '--replay-trace',
-      'output/replay/cli-pass/replay-results.json',
-    ]);
+    await program.parseAsync(['node', 'xiaoba', 'arena', 'live-contract', '--json']);
 
-    const run = JSON.parse(logs.join('\n'));
-    assert.strictEqual(run.run_id, 'cli-pass');
-    assert.strictEqual(run.review_mode, 'base_skill');
-    assert.strictEqual(run.decision, 'pass');
-    assert.strictEqual(run.replay_attempts.pass_count, 3);
-    assert.ok(fs.existsSync(path.join(testRoot, 'arena', 'runs', 'cli-pass', 'arena-run.json')));
+    const output = JSON.parse(logs.join('\n'));
+    assert.strictEqual(output.schema, 'barena.xiaoba_live_runtime_contract.v1');
+    assert.strictEqual(output.bounds.target_calls_per_turn, 4);
+    assert.strictEqual(output.enforcement.sdk_max_retries, 0);
+  });
+
+  test('registers the lightweight Scenario-based Arena entry', () => {
+    const program = createProgram();
+    registerArenaCommand(program);
+    const arena = program.commands.find(command => command.name() === 'arena');
+    const evaluate = arena?.commands.find(command => command.name() === 'evaluate');
+    assert.ok(evaluate);
+    assert.match(evaluate.description(), /Scenario -> Trace -> Finding\+Case -> shared Eval/);
+    assert.ok(evaluate.options.some(option => option.long === '--scenario'));
+    assert.ok(evaluate.options.some(option => option.long === '--role'));
+    assert.ok(evaluate.options.some(option => option.long === '--skill'));
+
+    const skill = arena?.commands.find(command => command.name() === 'skill');
+    const run = arena?.commands.find(command => command.name() === 'run');
+    const worker = run?.commands.find(command => command.name() === 'worker');
+    for (const command of [skill, worker]) {
+      assert.ok(command);
+      assert.equal(command.options.some(option => option.long === '--message'), false);
+      assert.equal(command.options.some(option => option.long === '--scenario-count'), false);
+      assert.equal(command.options.some(option => option.long === '--max-replay-cases'), false);
+    }
   });
 
   test('registers arena runtime prepare command', async () => {
@@ -286,15 +264,6 @@ function writeSkill(dirPath: string, name: string): void {
     'Use evidence.',
     '',
   ].join('\n'), 'utf-8');
-}
-
-function writeEvidenceRefs(root: string): void {
-  writeJson(path.join(root, 'output/user-cat/candidates/usercat-cli/manifest.json'), { run_id: 'usercat-cli' });
-  writeText(path.join(root, 'logs/sessions/pet/2026-06-29/session/traces.jsonl'), '{"entry_type":"trace"}\n');
-  writeJson(path.join(root, 'output/inspector/cli-case.json'), { issue_type: 'none' });
-  writeJson(path.join(root, 'data/reviewer-runs/reviewer-cli/scorecard.json'), { decision: 'pass' });
-  writeText(path.join(root, 'data/reviewer-runs/reviewer-cli/report.md'), '# report\n');
-  writeJson(path.join(root, 'output/replay/cli-pass/replay-results.json'), { pass: true });
 }
 
 function writeJson(filePath: string, value: unknown): void {

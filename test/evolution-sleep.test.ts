@@ -8,7 +8,6 @@ import {
   registerEvolutionCommand,
   runSupervisedProcess,
 } from '../src/commands/evolution';
-import { EvolutionDagManifest } from '../src/roles/evolution-cat/evolution-dag';
 import {
   buildEvolutionDigest,
   normalizeEvolutionDate,
@@ -111,21 +110,22 @@ describe('EvolutionCat nightly sleep', () => {
     assert.deepEqual(result.digest.patterns, []);
   });
 
-  test('sleep command invokes the Inspector-first DAG directly and harvest-only stays deterministic', async () => {
+  test('sleep command invokes the lightweight workflow directly and harvest-only stays deterministic', async () => {
     process.chdir(testRoot);
     let received: Record<string, unknown> | undefined;
     const program = new Command();
     program.exitOverride();
     registerEvolutionCommand(program, {
-      runDag: async options => {
+      runWorkflow: async options => {
         received = options as unknown as Record<string, unknown>;
-        return completedDag(testRoot, String(options.targetDate));
+        return completedEvolution(testRoot, String(options.targetDate));
       },
     });
     await program.parseAsync(['node', 'xiaoba', 'evolution', 'sleep', '--date', '2026-06-01']);
     assert.equal(fs.realpathSync(String(received?.workingDirectory)), fs.realpathSync(testRoot));
     assert.equal(received?.targetDate, '2026-06-01');
     assert.equal(received?.minOccurrences, 2);
+    assert.equal(received?.runsPerCase, 3);
     assert.equal(received?.verbose, false);
 
     assert.equal(normalizeEvolutionDate('2024-02-29'), '2024-02-29');
@@ -152,43 +152,14 @@ describe('EvolutionCat nightly sleep', () => {
     assert.equal(request?.verbose, true);
   });
 
-  test('promote command exposes only date + explicit name confirmation and forwards canonical options', async () => {
+  test('does not expose the removed manual promote command', () => {
     process.chdir(testRoot);
-    let received: Record<string, unknown> | undefined;
     const program = new Command();
     program.exitOverride();
-    registerEvolutionCommand(program, {
-      promoteCandidate: options => {
-        received = options as unknown as Record<string, unknown>;
-        return {
-          status: 'promoted',
-          promotion_id: 'evolution-dag-2026-06-01:skill-demo',
-          candidate_type: 'skill',
-          candidate_name: 'demo',
-          subject_id: 'skill-demo',
-          subject_fingerprint: 'a'.repeat(64),
-          production_ref: 'skills/demo',
-          receipt_ref: 'output/evolution/sleep/2026-06-01/promotion.json',
-        };
-      },
-    });
+    registerEvolutionCommand(program);
     const evolution = program.commands.find(command => command.name() === 'evolution');
     const promote = evolution?.commands.find(command => command.name() === 'promote');
-    assert.deepEqual(promote?.options.map(option => option.long).sort(), ['--confirm', '--date']);
-
-    const originalLog = console.log;
-    console.log = () => undefined;
-    try {
-      await program.parseAsync([
-        'node', 'xiaoba', 'evolution', 'promote', '--date', '2026-06-01', '--confirm', 'demo',
-      ]);
-    } finally {
-      console.log = originalLog;
-    }
-    assert.equal(fs.realpathSync(String(received?.workingDirectory)), fs.realpathSync(testRoot));
-    assert.equal(received?.targetDate, '2026-06-01');
-    assert.equal(received?.confirmName, 'demo');
-    assert.deepEqual(Object.keys(received || {}).sort(), ['confirmName', 'targetDate', 'workingDirectory']);
+    assert.equal(promote, undefined);
   });
 
   test('worker supervisor terminates a hung process and removes only its owned lock', async () => {
@@ -261,8 +232,8 @@ describe('EvolutionCat nightly sleep', () => {
           command: process.execPath,
           args: ['-e', leaderScript],
           workingDirectory: testRoot,
-          timeoutMs: 250,
-          killGraceMs: 150,
+          timeoutMs: 500,
+          killGraceMs: 300,
         }),
         /EVOLUTION_SLEEP_TIMEOUT/,
       );
@@ -276,25 +247,45 @@ describe('EvolutionCat nightly sleep', () => {
     }
   });
 
-  test('blocked DAG worker persists its manifest and marks the process unsuccessful', async () => {
+  test('blocked lightweight workflow persists its Result and marks the process unsuccessful', async () => {
     process.chdir(testRoot);
     const previousExitCode = process.exitCode;
-    const manifestPath = path.join(testRoot, 'output', 'evolution', 'sleep', '2026-06-01', 'dag-run.json');
+    const resultPath = path.join(testRoot, 'output', 'evolution', 'runs', 'evolution-2026-06-01', 'evolution-result.json');
     const program = new Command();
     program.exitOverride();
     registerEvolutionCommand(program, {
-      runDag: async () => {
-        const manifest: EvolutionDagManifest = {
-          ...completedDag(testRoot, '2026-06-01'),
-          status: 'blocked',
-          terminal: {
-            status: 'blocked',
-            summary: 'invalid role contract',
-          },
+      runWorkflow: async () => {
+        const result = {
+          evolution_run_id: 'evolution-2026-06-01',
+          attempts: [{
+            finding_case: {
+              finding: {
+                summary: 'invalid role contract',
+                evidence_refs: ['logs/source/traces.jsonl'],
+              },
+              case: {
+                case_id: 'case-role-contract',
+                task: 'Reproduce the role contract failure.',
+                oracle: {
+                  hard_verifiers: ['trace_exists'],
+                  semantic_criteria: ['The role contract remains valid.'],
+                },
+                source: {
+                  trace_refs: ['logs/source/traces.jsonl'],
+                },
+              },
+            },
+            activated: false,
+            reasons: ['invalid role contract'],
+          }],
         };
-        fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
-        fs.writeFileSync(manifestPath, JSON.stringify(manifest), 'utf-8');
-        return manifest;
+        fs.mkdirSync(path.dirname(resultPath), { recursive: true });
+        fs.writeFileSync(resultPath, JSON.stringify(result), 'utf-8');
+        return {
+          result,
+          result_path: resultPath,
+          digest_path: path.join(testRoot, 'output', 'evolution', 'sleep', '2026-06-01', 'digest.json'),
+        };
       },
     });
 
@@ -304,8 +295,8 @@ describe('EvolutionCat nightly sleep', () => {
         'node', 'xiaoba', 'evolution', 'sleep', '--worker', '--date', '2026-06-01',
       ]);
       assert.equal(process.exitCode, 1);
-      assert.equal(fs.existsSync(manifestPath), true);
-      assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf-8')).status, 'blocked');
+      assert.equal(fs.existsSync(resultPath), true);
+      assert.equal(JSON.parse(fs.readFileSync(resultPath, 'utf-8')).attempts[0].activated, false);
     } finally {
       process.exitCode = previousExitCode;
     }
@@ -352,21 +343,14 @@ class MemoryCrontab implements CrontabAdapter {
   write(content: string): void { this.content = content; }
 }
 
-function completedDag(root: string, targetDate: string): EvolutionDagManifest {
+function completedEvolution(root: string, targetDate: string) {
   return {
-    version: 1,
-    run_id: `evolution-dag-${targetDate}`,
-    target_date: targetDate,
-    status: 'completed',
-    route: 'no_op',
-    stages: [],
-    terminal: {
-      status: 'no_op',
-      summary: 'no recurring signal',
+    result: {
+      evolution_run_id: `evolution-${targetDate}`,
+      attempts: [],
     },
-    started_at: '2026-07-15T00:00:00.000Z',
-    completed_at: '2026-07-15T00:00:01.000Z',
-    manifest_ref: path.join(root, 'output/evolution/sleep', targetDate, 'dag-run.json'),
+    result_path: path.join(root, 'output/evolution/runs', `evolution-${targetDate}`, 'evolution-result.json'),
+    digest_path: path.join(root, 'output/evolution/sleep', targetDate, 'digest.json'),
   };
 }
 

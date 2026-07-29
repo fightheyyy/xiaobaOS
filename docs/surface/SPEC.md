@@ -1,7 +1,7 @@
 # Surfaces SPEC
 
 状态：Active
-最后更新：2026-07-15
+最后更新：2026-07-29
 适用范围：XiaoBa 的用户入口层，包括 `src/commands`、`src/feishu`、`src/weixin`、`src/pet`、`src/dashboard` 和 `desktop`。
 
 本文件是顶层架构模块之一的入口层 spec，也是 Dashboard、Electron 和 packaging 资源的唯一架构文档。
@@ -36,7 +36,7 @@ Out of scope:
 
 ## Current Architecture
 
-当前入口层已经收敛到共享 `AgentSession`，但各入口仍分别维护平台协议、文件语义和服务控制。CLI 提供跨平台的 `xiaoba evolution sleep`，以及人工准入命令 `xiaoba evolution promote --date <date> --confirm <name>`；后者绕过 Base/Agent loop，只接受由该日 DAG 和 Arena 不可变 subject 共同证明的 Candidate，并写 promotion receipt。macOS 另提供 per-project `evolution schedule install|status|remove`，其他平台当前需手动触发 sleep。定时入口在受监督的 worker 进程中直接运行固定 `EvolutionDAGRunner`，不进入 Base；worker timeout 会终止进程组并只清理自己拥有的锁。`--harvest-only` 是不调用模型的诊断入口。Channel delivery 的 canonical prompt 现在集中在 `prompts/surface.md`：`AgentSession` 用它注入 Feishu、Weixin、Pet 和 Dashboard 的 surface system message，role prompt 可通过 include 引用同一份交付规则。Pet/Dashboard 的 `pet:<petId>:role-<role>` session key，以及带附加隔离后缀的 `pet:<petId>:role-<role>:run-<run-id>` 这类 session key，已经绑定到 role-scoped `SkillManager` / `ToolManager`；同一个宠物在 Chat 页面和桌宠窗口之间按 session key 共享角色技能、历史和 SSE replay。Pet Chat visible events 写入 `data/chat/sessions/**`。PetChannel 现在也会为 session 注册 `SubAgentManager` 回调，后台子智能体完成通知会重新注入同一个 Pet `AgentSession`，并把后续 text/file/tool events 写入 Pet visible history。macOS Electron 构建会把 optional dependency `@steipete/peekaboo@3.8.0` 的 CLI 二进制复制到 `resources/drivers/peekaboo/peekaboo`，由 GuiCat 固定路径发现；其他平台不复制这颗 macOS-only driver。入口 runtime smoke 由 `test/contract-smoke/suites/surface-runtime-smoke.json` 和 `test/contract-smoke/suites/surface-runtime-file-smoke.json` 承担，当前维护中的 gate 覆盖 production FeishuBot event handler 和 Pet router，验证平台 parser / normalizer、入口 runtime、channel callback / SSE delivery 以及 runtime file delivery 的最小闭环。Feishu sender 现在会把 SDK message/file upload response 转成 `external_delivery_receipts`，Surface Runtime File gate 要求 Feishu runtime replay 具备 message/upload/file receipt 和 platform ids。更重的真实入口 E2E 不再放在 runtime harness 中扩张，后续应由 ReviewerCat 或 role-owned benchmark 明确拥有。
+当前入口层已经收敛到共享 `AgentSession`，但各入口仍分别维护平台协议、文件语义和服务控制。CLI 的 `evolution sleep` 与 schedule 已进入轻量 Evolution control；manual `evolution promote` 已删除。Channel delivery 的 canonical prompt 集中在 `prompts/surface.md`。Pet/Dashboard 的 role-scoped session key 已绑定到对应 SkillManager / ToolManager，并在 Chat 与桌宠间共享历史和 SSE replay。Dashboard 只展示、选择、安装或删除当前 Role/Skill package，不再维护 capability lifecycle。macOS Electron 只打包 GuiCat 的固定 Peekaboo driver。入口级文本、文件和 external receipt 由 deterministic Test 覆盖。
 
 ```mermaid
 flowchart LR
@@ -44,10 +44,10 @@ flowchart LR
     Channels["Feishu / Weixin / Pet / Dashboard / Electron"] --> Adapters
     Adapters --> Session["Shared AgentSession<br/>role-scoped services"]
     Session --> Delivery["Terminal / IM / SSE<br/>visible delivery evidence"]
-    CLI --> Sleep["schedule / sleep<br/>EvolutionDAGRunner"]
-    Sleep --> Evidence["DAG evidence"]
-    CLI --> Promote["evolution promote<br/>human confirmation"]
-    Promote --> Production["Exact Arena snapshot<br/>active capability + receipt"]
+    CLI --> Sleep["schedule / evolution sleep"]
+    Sleep --> Control["Lightweight Evolution control"]
+    Control --> TestEval["shared Test + Eval"]
+    TestEval --> Activation["Atomic activation<br/>capability: new Session<br/>code: next process"]
 ```
 
 ## Target Architecture
@@ -61,10 +61,9 @@ flowchart LR
     Runtime --> Delivery["Visible delivery + evidence"]
     Delivery --> Verify["Surface contract tests"]
     Verify --> Contract
-    CLI["CLI control plane"] --> Sleep["Deterministic scheduled workflow"]
-    Sleep --> Evidence["Trace-derived DAG evidence"]
-    CLI --> Promote["Deterministic human Promote"]
-    Promote --> Production["Verified production capability + receipt"]
+    CLI["CLI control plane"] --> Evolution["Lightweight Evolution trigger"]
+    Evolution --> TestEval["shared Test + Eval"]
+    TestEval --> Activate["Atomic activation<br/>capability: new Session<br/>code: next process"]
 ```
 
 ## Contracts
@@ -86,12 +85,12 @@ flowchart LR
 - 新增入口必须定义 session key 规则、用户可见输出语义、文件处理、TTL/cleanup/wakeup 行为。
 - Platform-specific optional drivers 必须只进入对应平台的安装包，并落在 role adapter 已声明的固定资源路径；不得把 driver-side Agent/MCP 一并暴露给 runtime。
 - Dashboard/Pet 这类本地 HTTP surface 在扩大网络暴露前必须先有 auth、permission 和 command/path validation。
-- Dashboard 的 Skill / Role 生命周期动作必须显式遵守 `blocked → candidate → active`：解除阻塞只回到 Candidate，只有单独的人工 Promote 动作可以进入 Active；选择 Candidate Role 只表示显式试用，不改变其生命周期状态。
-- 自进化 Candidate 不走 Dashboard 的普通 status-only Promote。CLI 只接受 `date + exact candidate name confirmation`，不得让调用者替换 subject、scorecard、source、target 或强制覆盖；命令必须在成功后输出并持久化同一份 receipt。
+- Dashboard 不拥有 Candidate lifecycle 或裁决动作；它只展示当前 package，Evolution activation evidence 仍由原始只读产物提供。
+- Candidate 通过 shared Test + Eval 后由 Evolution 调用 runtime-owned atomic activation；Role/Skill 只影响新 Session，code 只影响下一进程，Surface 不参与裁决。
 
 ## Interaction With Other Modules
 
 - 调用 `docs/agent-runtime/SPEC.md` 定义的 `AgentSession` 和 runner，不直接调用 provider。
 - 使用 `docs/roles-skills/SPEC.md` 定义的 role/skill policy，不自行拼接角色运行时。
 - 将可观测输出写入 [`../observability-evidence/SPEC.md`](../observability-evidence/SPEC.md) 定义的 trace、visible history 或 artifact evidence。
-- 入口级 deterministic contract smoke 由 `test/contract-smoke/suites` 维护；当前 Feishu 和 Pet 的入口 runtime 最小闭环由 `test:surface-runtime` 覆盖，runtime file delivery 和 Feishu external receipt shape 由 `test:surface-runtime-file` 覆盖。release-blocking runtime benchmark 由 `eval:base-runtime` 消费；更重的真实入口 E2E 归未来 role-owned live benchmark 边界。
+- 入口级 deterministic contract smoke 由 `test/contract-smoke/suites` 维护；Feishu 和 Pet 的入口 Runtime 最小闭环由 `test:surface-runtime` 覆盖，文件与 receipt shape 由 `test:surface-runtime-file` 覆盖。预写响应的 BaseRuntime 覆盖由 `test:base-runtime` 执行，不属于 Agent Eval。

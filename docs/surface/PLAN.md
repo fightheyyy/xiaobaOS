@@ -1,7 +1,7 @@
 # Surface PLAN
 
 状态：Active
-最后更新：2026-07-15
+最后更新：2026-07-29
 Owner：Surface maintainers
 
 ## Current Status
@@ -14,9 +14,8 @@ Owner：Surface maintainers
 - Feishu Surface App ID 已作为 canonical application identity；SecretaryCat 按同 App ID 显式选择官方 `lark-cli` profile，不修改全局 active profile。
 - macOS Electron packaging maps the optional `@steipete/peekaboo@3.8.0` binary to GuiCat's fixed `resources/drivers/peekaboo/peekaboo` path.
 - Dashboard、Pet 和 Bridge 的网络认证与 Owner 授权仍未闭合。
-- Dashboard lifecycle controls expose Block、Unblock to Candidate and explicit Promote to Active as separate Skill/Role actions; Candidate Role trial selection does not promote it.
-- Cross-platform CLI nightly evolution entry and macOS-only idempotent per-project crontab install/status/remove are implemented. Other platforms currently trigger `evolution sleep` manually. The supervised worker invokes the fixed Inspector-first DAG directly, without Base, while preserving timeout and PID-owned lock semantics.
-- Cross-platform `evolution promote --date <date> --confirm <name>` is the evidence-bound human control for self-evolution Candidates. It derives all Arena evidence itself, never enters Base/EvolutionCat, and retains a durable receipt; Dashboard's status-only action remains limited to already-installed manual assets.
+- `evolution sleep` 与 schedule 已进入轻量 Evolution control；manual promote CLI 已删除。
+- Dashboard capability lifecycle API/UI 已删除；Role/Skill 卡片只保留选择、安装和删除 package。
 
 ```mermaid
 flowchart LR
@@ -35,10 +34,10 @@ flowchart LR
 7. GuiCat macOS optional driver packaging：completed for local unsigned/ad-hoc build and artifact inspection。
 8. Production auth and Owner permission boundary：not started。
 9. Real external upload/download and cross-process recovery E2E：not started。
-10. Evolution nightly CLI/schedule entry：completed for cross-platform manual sleep and macOS cron；worker/lock and direct Inspector-first DAG invocation are verified。
+10. Evolution nightly CLI/schedule entry：completed for lightweight control workflow、cross-platform manual sleep and macOS cron。
 11. Nightly worker timeout and owned-lock cleanup：completed。
-12. Dashboard three-state lifecycle actions：completed；blocked recovery and candidate promotion are separate API/UI actions。
-13. Evidence-bound evolution promotion CLI：completed；exact-name confirmation, immutable Arena snapshot materialization and durable receipt are enforced without automatic promotion。
+12. Dashboard three-state lifecycle removal：completed。
+13. Lightweight Evolution trigger and activation status：completed for CLI capability new-Session / code next-process activation evidence。
 
 ## Next Steps
 
@@ -61,8 +60,8 @@ flowchart LR
 - CLI does not expose channel delivery tools.
 - Channel delivery tools appear only with real callbacks and explicit surface context.
 - Role-scoped Pet/Dashboard sessions isolate skills, tools, history and SSE replay.
-- Dashboard cannot move a blocked Skill/Role directly to Active; unblock returns Candidate and promotion requires its own explicit action.
-- Self-evolution Candidate promotion accepts only date plus exact-name confirmation, refuses caller-selected evidence/target/force overrides, and persists a receipt linked from both the DAG and Arena run.
+- Dashboard does not create a second Candidate lifecycle or promotion policy.
+- Passing Candidates activate through the runtime-owned capability new-Session / code next-process boundary；Surface only reports the result.
 - Feishu Surface and SecretaryCat use the same App ID whenever Surface credentials are configured; per-command profile selection does not mutate global `lark-cli` state.
 - Network-exposed control paths have authentication, Owner authorization and command/path validation.
 - Surface implementation changes update this PLAN and [`SPEC.md`](SPEC.md), not a separate desktop/test document.
@@ -75,10 +74,11 @@ flowchart LR
 
 ## Recent Verification
 
-- Surface current/target Mermaid diagrams rendered successfully after separating the shared ordinary AgentSession lane, scheduled self-evolution DAG lane and explicit human Promote control lane.
+- `npm test` passed 556/556 across 100 suites；`npm run build` passed。
+- Surface diagrams reflect the lightweight Evolution CLI and shared Test/Eval activation path.
 - `electron-builder --mac --dir --publish never` passed with the platform-specific optional driver mapping.
 - The packaged Peekaboo binary is executable at `Contents/Resources/drivers/peekaboo/peekaboo` and reports version 3.8.0.
 - GuiCat resolved the packaged resources path and returned `ready=true` with the role-local Skill present in the app resources.
-- Evolution sleep command tests cover direct DAG invocation, deterministic harvest-only mode, project-scoped cron idempotency, worker process-group timeout and PID-owned lock cleanup; a real-provider InspectorCat `no_op` E2E passed without Base.
-- Dashboard API tests cover blocked promotion rejection, unblock-to-candidate, explicit candidate promotion and active-role clearing when a role is blocked.
-- Arena-internal Pet tests prove `requiredActiveSkillName` cannot be supplied through HTTP/tool args, reactivates the same subject before every queued message and fails closed when missing; the current-contract real-provider closeout proof bound all 7 Arena turns and both fresh post-promotion sessions to `evo-closeout-v2-formatter`.
+- Evolution sleep command tests cover lightweight workflow invocation, deterministic harvest, project-scoped cron idempotency, worker process-group timeout and PID-owned lock cleanup.
+- Dashboard tests verify lifecycle mutation routes are absent and cards expose only package selection/deletion。
+- Arena-internal Pet tests prove `requiredActiveSkillName` cannot be supplied through HTTP/tool args and fails closed when missing; this adapter can be reused by the lightweight Arena migration.

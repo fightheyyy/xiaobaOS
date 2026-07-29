@@ -1,95 +1,73 @@
 # Arena PLAN
 
 状态：Active
-最后更新：2026-07-20
+最后更新：2026-07-29
 Owner：Arena maintainers
-
-Arena is the candidate capability acceptance environment. It reviews skills and roles; it does not replace Evaluation or automatically promote a subject.
 
 ## Current Status
 
-- Three review modes exist: `base_skill`, `role_skill`, and `role`.
-- GitHub skill import and local role snapshot remain isolated from production assets.
-- Skill and Role subjects are content-addressed by their full copied package fingerprint and retain Arena-owned immutable source snapshots.
-- Arbitrary isolated Skill and Candidate Role intake exist; both snapshot into the run-local Arena subject store without touching production assets.
-- Clean runtime preparation records run-local home, skills, roles, workspace and temp roots.
-- The executable path runs UserCat pressure → target runtime → InspectorCat extraction → Arena multi-case replay / compare / scoring and writes an Arena-owned scorecard without starting ReviewerCat.
-- ReviewerCat remains outside Arena and handles only one frozen Replay Case in the scheduled evolution DAG, returning `closed | next_run | blocked`.
-- Behavior-impacting Patch Candidates enter the separate Arena `repair_regression` gate after Reviewer closure; it performs three read-only candidate-code replays by default and retains a Patch-specific scorecard without creating a Skill/Role subject.
-- Seven SkillsBench-derived live proofs calibrated UserCat pressure, InspectorCat extraction, Arena replay/scoring and final Arena decisions against hidden verifiers; this is evidence for the review loop, not universal proof.
-- Promotion into production skills/roles or Live Agent Eval remains explicit and manual.
-- Strict fixed-line Skill contracts are checked across every evaluated native and replay turn through `arena-output-line-prefixes`; Arena re-activates the exact subject before every internal Pet message and requires matching final Skill visibility, so duplicate/extra deliveries, wrong lines, unmounted turns and incomplete trace coverage cannot produce `pass`.
-- Self-evolution promotion is an explicit runtime CLI action bound to the exact DAG, Arena run and immutable subject fingerprint; it materializes the snapshot, changes only outer lifecycle and writes a durable receipt. Arena never invokes it automatically.
-- Sandbox network/secret isolation and cross-platform adapters need further hardening.
+- Arena 的定位已收敛为“UserCat 模拟用户的 Agentic Eval”。
+- `Scenario → UserCat↔Subject → Trace → InspectorCat → Finding+Case → shared Eval` 已实现为轻量 workflow。
+- 用户可提供 Scenario；缺省时 UserCat proposer 生成一个。
+- InspectorCat 输出严格配对的 Finding+Case；无 Case 直接 pass。
+- ArenaResult decision 已统一为 `pass | fail | blocked`。
+- `xiaoba arena evaluate` 已接通已安装 Role/Skill 的轻量 Scenario workflow。
+- `arena skill` 与 `arena run execute/worker` 已切到同一个 Arena service。
+- Subject interaction adapter 返回标准 AgentSession Trace，而不是 UserCat package trace。
+- imported subject 的 snapshot 与 clean runtime 已收敛为隔离 adapter。
+- SkillsBench/effectiveness 实验 scorer 已删除。
+- 旧 scorecard worker、run index、promotion、patch regression 和专用 Reviewer replay Tool 已删除。
 
 ```mermaid
 flowchart LR
-    Subject["candidate skill / role"] --> Clean["clean runtime"]
-    Clean --> User["UserCat pressure"]
-    User --> Evidence["native trace / artifacts"]
-    Evidence --> Inspector["InspectorCat"]
-    Inspector --> Replay["Arena replay / compare"]
-    Replay --> Score["Arena scorecard"]
-    Score -. "explicit promotion only" .-> Trusted["trusted assets"]
+    Core["Lightweight workflow"] --> Adapter["Reuse clean runtime adapters"]
+    Adapter --> CLI["Default Arena CLI"]
 ```
 
 ## Milestones
 
-1. Subject manifest and three review modes：completed。
-2. Clean runtime overlay：completed。
-3. Automatic UserCat / InspectorCat / Arena replay-score run path：completed。
-4. Scorecard and run index：completed。
-5. Hidden-verifier calibration proof：completed for seven current cases。
-6. Strong secret/network isolation：partial。
-7. Linux/Windows sandbox adapters：not started。
-8. Explicit promotion workflow with runtime enforcement：completed for self-evolution Candidate Skill/Role snapshots；manual installed-asset lifecycle remains a separate Dashboard path。
-9. Zero-default-Base-Skill clean-runtime policy：completed；Arena reuses the empty packaged Base inventory and mounts only the declared subject/role assets。
-10. Evolution DAG candidate intake：completed；isolated Skill/Role paths and lifecycle gate verification are implemented。
-11. Content-addressed Skill/Role subject snapshots：completed；same-path content changes create a new subject without rewriting earlier source。
-12. Patch Candidate repair regression：completed；Reviewer risk routing, multi-attempt isolated replay, trace identity gate and Patch scorecard are implemented without expanding capability subject types。
+1. Arena 产品语义收敛：completed。
+2. Scenario / ArenaResult 最小 contract：completed。
+3. UserCat Scenario fallback：completed。
+4. Inspector Finding+Case adapter：completed。
+5. Shared Eval integration：completed at orchestration boundary。
+6. 删除实验 effectiveness scorers：completed。
+7. 新轻量 CLI：completed；installed/imported Role/Skill 均进入同一 service。
+8. 删除旧 scorecard / promotion / patch regression：completed。
+9. 可选 A/B compare：not started；非默认路径。
 
 ## Next Steps
 
-- Make recorded sandbox/network policy match enforced OS behavior.
-- Keep provider credentials outside subject tool environments.
-- Repeat calibration across seeds, providers and time windows before broad claims.
-- Repeat the closed real-provider Candidate Skill proof across providers, seeds and time windows before making broad effectiveness claims.
-- Preserve one real-provider isolated Repair proof before claiming autonomous code-repair effectiveness.
-- Keep full proof corpora outside the main repository when they are not product runtime assets.
+- 从真实 Arena Trace 回归高价值 Finding+Case，并逐步纳入共享 CaseSet。
+- 只有真实副作用 Case 需要时，才扩展非 macOS 的 enforced Replay adapter。
+- 核心单 Subject 流程稳定后，再决定是否增加最小 A/B compare。
 
 ## Owners
 
-- Arena commands/control plane：`src/commands/arena.ts`, `src/arena/**`
-- Review-site state：`arena/**`
-- Evaluator inputs：UserCat pressure and InspectorCat extraction under Roles & Skills; multi-case replay / compare / scoring remains Arena-owned
-- Fresh evidence：Agent Runtime and Observability & Evidence
+- Workflow：`src/arena/arena-workflow.ts`
+- Scenario：`src/roles/user-cat/scenario.ts`
+- Inspection：`src/roles/inspector-cat/finding-case.ts`
+- Production composition：`src/arena/arena-service.ts`
+- Subject/runtime isolation：`src/arena/arena-manager.ts`, `src/arena/arena-runner.ts`
 
 ## Acceptance Criteria
 
-- Imported subjects do not enter production `skills/` or role registration by default.
-- Re-importing changed Skill or Role content produces a distinct subject while the earlier source snapshot remains byte-stable and runnable.
-- Every executable run declares one review mode and one subject.
-- Clean runtime manifests contain no secret values.
-- A pass requires fresh runtime evidence and Arena-owned replay / compare verification.
-- Every Candidate requires one unique native session per UserCat/replay run, exactly one safe trace binding, globally unique trace IDs across the complete UserCat + replay Arena run, and exact sequential turn coverage `1..expected_turns`; this identity gate applies even when no fixed-output contract is declared.
-- A declared fixed-line output contract additionally requires final `tool_visibility.activeSkillName` bound to the immutable subject on every checked turn, `expected_turns=checked_turns=passed_turns>0`, zero violating turns and every evaluated session fully compliant.
-- Unsafe behavior remains visible even when the task output is useful.
-- Promotion requires explicit human/maintainer action.
-- `repair_regression` accepts only a DAG-owned Patch Candidate bound to `base_commit + patch_sha256`, replays the Reviewer-frozen case against the same candidate code, and passes only when every retained attempt and trace identity check passes.
-- Self-evolution promotion verifies the DAG/Arena/subject/fingerprint chain, binds the scorecard and run index to one canonical Inspector cases artifact, rebuilds ordered replay selection from that artifact with the retained Arena runner config and shared selector, recomputes the Arena decision, re-extracts source inputs with the runtime extractor, re-reads raw trace identity/output evidence, derives visible delivery only from the fresh trace, semantically reconstructs each retained replay manifest/input/result/comparison set, re-derives the snapshot Role tool profile, materializes only the Arena snapshot, refuses unmanaged target overwrite or symlink receipt slots and persists a linked content-addressed receipt covering the Inspector cases, runner config, source trace and retained replay artifacts.
-- Arena architecture changes update this PLAN and [`SPEC.md`](SPEC.md) only.
+- Scenario 是唯一 Arena 入口 seed；无用户输入时才由 UserCat 生成。
+- UserCat Trace 与真实用户 Trace 使用同一 schema。
+- Inspector 一次检查原始 Trace，只输出 0..n Finding+Case。
+- ReviewerCat 不直接判断 Scenario Trace。
+- 所有 Case 通过 shared Eval；Arena 无重复 evaluator。
+- Replay Trace 不递归进入 Inspector。
+- Arena 只输出一个 ArenaResult；Report 只展示。
 
 ## Risks / Open Questions
 
-- Current sandbox metadata can overstate network/secret isolation if OS policy is weaker.
-- Seven calibration cases do not prove cross-provider or long-term generalization.
-- One real-provider closed Candidate Skill loop proves its exact closeout-format contract and workflow integrity, not general autonomous improvement.
-- The fixed-line declaration is intentionally narrow; arbitrary regex/schema/script contracts remain out of scope until a demonstrated need justifies another contract type.
-- Explicit promotion remains a human/maintainer action rather than an Arena-owned automatic transition; Dashboard manual-asset promotion is not evidence for the self-evolution chain.
-- Patch regression has deterministic integration coverage but not yet a preserved real-provider Repair proof; it must not be described as broad autonomous code repair.
+- clean runtime 当前依赖平台 sandbox 能力；受限执行不可用时必须 fail closed。
+- “无 Case = pass”代表本 Scenario 未发现可回归反例，不等于证明全局能力。
 
 ## Recent Verification
 
-- Evolution DAG/Arena/promotion/Pet/UserCat/replay focused tests passed 155/155 after adding the Arena-run-wide Trace identity gate, all-turn contract checks, deterministic per-message subject mounting, Inspector-rooted replay selection, exact replay case/source binding, retained-replay semantic re-attestation, explicit raw-evidence-bound promotion and stale-run cleanup; the full repository now passes 654/654 across 100 suites and `npm run build` also passes. Patch-focused coverage additionally proves conditional `repair_regression`, all-pass/mixed/reopened/blocked/unsafe decisions, evaluator trust-root write/delete protection and candidate-code replay isolation. The preserved v3-shaped regression remains classified as 6 checked turns, 4 passed, 2 violations and only 1/3 fully compliant sessions; separate tests prove every UserCat/replay turn is subject-bound, trace IDs cannot be reused across native or replay sessions, synchronized scorecard/run/artifact edits cannot retarget an attempt to an uninspected easy source, top-level Arena decisions and replay config are re-derived, forged retained visible-output fields cannot replace fresh-trace delivery evidence, replay inputs/results/comparison/fresh trace cannot be forged into a pass, non-strict Roles cannot pass with empty replay output, an unconfigured Pet run does not auto-activate, and raw-evidence drift or mismatch fails closed.
-- Current and target Mermaid diagrams rendered successfully after the ReviewerCat / Arena ownership split was made explicit.
-- Current-contract real-provider run `evo-closeout-v2-formatter` started from two independent failing Pet sessions (0/2). InspectorCat routed the repeated output-protocol finding to EvolutionCat; after one generated revision was correctly rejected as `unstable`, Arena passed immutable subject `skill-01752e5069` in `base_skill` mode across 3 independent UserCat sessions / 7 turns (`trace_identity_check` 3/3, output 7/7, 0 violations). `xiaoba evolution promote --date 2026-07-15 --confirm evo-closeout-v2-formatter` re-read the raw traces and wrote a durable explicit-CLI receipt with 7 exact raw-evidence hashes, including the canonical Inspector cases and Arena runner config; two fresh Pet sessions then passed (2/2), and a same-date nightly rerun preserved receipt and production hashes. The ignored bundle is self-verified by `node output/evolution/proofs/2026-07-15-evo-closeout-v3/proof/verify-closeout.mjs`.
+- 清理后 `npm test` passed 556/556 across 100 suites。
+- 清理后 Arena/Evolution focused tests passed 71/71 across 10 suites。
+- 清理后 `npm run build` passed。
+- Contract smoke passed 23/23 cases。

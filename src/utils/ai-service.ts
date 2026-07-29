@@ -6,6 +6,12 @@ import { AnthropicProvider } from '../providers/anthropic-provider';
 import { OpenAIProvider } from '../providers/openai-provider';
 import { OllamaProvider } from '../providers/ollama-provider';
 import { Logger } from './logger';
+import {
+  ArenaProviderCallComponent,
+  arenaLiveAuditEnabled,
+  arenaLiveProviderConfig,
+  runArenaAuditedProviderCall,
+} from '../arena/live-audit';
 
 /**
  * AI 服务 - 统一的 AI 调用入口
@@ -47,16 +53,55 @@ interface ProviderCallError extends Error {
   retryable?: boolean;
 }
 
+export interface AIServiceOptions {
+  arenaComponent?: ArenaProviderCallComponent;
+}
+
+/**
+ * Keep test/custom AgentServices compatible while preventing a custom service
+ * from silently bypassing live-audit telemetry in a paid Arena run.
+ */
+export async function runWithArenaAuditScope<T>(
+  service: unknown,
+  scopeId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const scoped = service as {
+    withArenaAuditScope?: (scope: string, action: () => Promise<T>) => Promise<T>;
+  };
+  if (typeof scoped?.withArenaAuditScope === 'function') {
+    return scoped.withArenaAuditScope(scopeId, fn);
+  }
+  if (arenaLiveAuditEnabled()) {
+    throw new Error('Arena live audit requires an AI service with scoped provider telemetry');
+  }
+  return fn();
+}
+
 export class AIService {
   private config: ChatConfig;
   private providerChain: ProviderEndpoint[];
+  private arenaComponent?: ArenaProviderCallComponent;
+  private arenaScopeId?: string;
 
-  constructor(overrides?: Partial<ChatConfig>) {
+  constructor(overrides?: Partial<ChatConfig>, options: AIServiceOptions = {}) {
     this.config = {
       ...ConfigManager.getConfig(),
+      ...(arenaLiveProviderConfig() || {}),
       ...(overrides || {})
     };
+    this.arenaComponent = options.arenaComponent;
     this.providerChain = this.buildProviderChain();
+  }
+
+  async withArenaAuditScope<T>(scopeId: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.arenaScopeId;
+    this.arenaScopeId = scopeId;
+    try {
+      return await fn();
+    } finally {
+      this.arenaScopeId = previous;
+    }
   }
 
   /**
@@ -85,7 +130,7 @@ export class AIService {
       provider: this.createProvider(primaryConfig),
     });
 
-    for (const backup of this.loadBackupConfigsFromEnv()) {
+    for (const backup of arenaLiveAuditEnabled() ? [] : this.loadBackupConfigsFromEnv()) {
       chain.push({
         label: backup.label,
         config: backup.config,
@@ -238,7 +283,10 @@ export class AIService {
     }
 
     return this.executeWithFailover(
-      endpoint => this.withRetry(() => endpoint.provider.chat(messages, tools), endpoint),
+      endpoint => this.withRetry(
+        () => this.auditedProviderCall(endpoint, messages, tools, () => endpoint.provider.chat(messages, tools)),
+        endpoint,
+      ),
       'chat'
     );
   }
@@ -274,12 +322,22 @@ export class AIService {
           try {
             if (allowStreamRetry) {
               return await this.withRetry(
-                () => endpoint.provider.chatStream(messages, tools, streamCallbacks),
+                () => this.auditedProviderCall(
+                  endpoint,
+                  messages,
+                  tools,
+                  () => endpoint.provider.chatStream(messages, tools, streamCallbacks),
+                ),
                 endpoint,
                 callbacks
               );
             }
-            return await endpoint.provider.chatStream(messages, tools, streamCallbacks);
+            return await this.auditedProviderCall(
+              endpoint,
+              messages,
+              tools,
+              () => endpoint.provider.chatStream(messages, tools, streamCallbacks),
+            );
           } catch (error) {
             const streamError = (error instanceof Error ? error : new Error(String(error))) as StreamFailoverError;
             streamError.__streamTextEmitted = emittedText;
@@ -441,20 +499,21 @@ export class AIService {
    */
   private async withRetry<T>(fn: () => Promise<T>, endpoint: ProviderEndpoint, callbacks?: StreamCallbacks): Promise<T> {
     let lastError: any;
+    const maxRetries = arenaLiveAuditEnabled() ? 0 : MAX_RETRIES;
 
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await fn();
       } catch (error: any) {
         lastError = error;
 
-        if (attempt >= MAX_RETRIES || !this.isRetryable(error)) {
+        if (attempt >= maxRetries || !this.isRetryable(error)) {
           throw error;
         }
 
         // 通知用户正在重试
         if (attempt === 0 && callbacks?.onRetry) {
-          callbacks.onRetry(attempt + 1, MAX_RETRIES);
+          callbacks.onRetry(attempt + 1, maxRetries);
         }
 
         // 计算等待时间：优先用 Retry-After，否则指数退避
@@ -474,6 +533,24 @@ export class AIService {
     }
 
     throw lastError;
+  }
+
+  private auditedProviderCall(
+    endpoint: ProviderEndpoint,
+    messages: Message[],
+    tools: ToolDefinition[] | undefined,
+    invoke: () => Promise<ChatResponse>,
+  ): Promise<ChatResponse> {
+    return runArenaAuditedProviderCall({
+      component: this.arenaComponent,
+      scopeId: this.arenaScopeId,
+      provider: endpoint.config.provider || 'openai',
+      model: endpoint.config.model || '',
+      requestedOutputLimit: endpoint.config.maxTokens ?? 8192,
+      messages,
+      tools,
+      invoke,
+    });
   }
 
   /**

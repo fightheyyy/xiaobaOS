@@ -6,11 +6,10 @@ import { DoctorRunnerDependencies, runDoctor } from '../src/doctor/doctor-runner
 import { RoleConfig } from '../src/types/role';
 
 const roleConfigs: Record<string, RoleConfig> = {
-  'browser-cat': { displayName: 'BrowserCat', promptFile: 'browser.md', status: 'active' },
-  'gui-cat': { displayName: 'GuiCat', promptFile: 'gui.md', status: 'active' },
-  'secretary-cat': { displayName: 'SecretaryCat', promptFile: 'secretary.md', status: 'active' },
-  'candidate-cat': { displayName: 'CandidateCat', promptFile: 'candidate.md', status: 'candidate' },
-  'blocked-cat': { displayName: 'BlockedCat', promptFile: 'blocked.md', status: 'blocked' },
+  'browser-cat': { displayName: 'BrowserCat', promptFile: 'browser.md' },
+  'gui-cat': { displayName: 'GuiCat', promptFile: 'gui.md' },
+  'secretary-cat': { displayName: 'SecretaryCat', promptFile: 'secretary.md' },
+  'custom-cat': { displayName: 'CustomCat', promptFile: 'custom.md' },
 };
 
 function readyBrowser(): AgentBrowserDriverStatus {
@@ -58,18 +57,12 @@ function dependencies(overrides: DoctorRunnerDependencies = {}): DoctorRunnerDep
       apiKey: 'test-secret-api-key',
       model: 'gpt-test',
     }),
-    listManagedRoles: () => Object.keys(roleConfigs).sort(),
+    listRoles: () => Object.keys(roleConfigs).sort(),
     getRoleConfig: roleName => roleConfigs[roleName],
-    resolveManagedRole: roleName => {
+    resolveRole: roleName => {
       const normalized = roleName.toLowerCase();
       if (normalized === 'browser') return 'browser-cat';
-      if (normalized === 'candidate-alias') return 'candidate-cat';
-      return roleConfigs[normalized] ? normalized : undefined;
-    },
-    resolveRuntimeRole: roleName => {
-      const normalized = roleName.toLowerCase();
-      if (normalized === 'browser') return 'browser-cat';
-      if (normalized === 'candidate-alias' || normalized === 'blocked-cat') return undefined;
+      if (normalized === 'custom') return 'custom-cat';
       return roleConfigs[normalized] ? normalized : undefined;
     },
     browserStatus: async () => readyBrowser(),
@@ -179,32 +172,23 @@ describe('runDoctor', () => {
     assert.strictEqual(openai.ready, false);
   });
 
-  test('distinguishes explicit candidate selection from blocked and alias-only selection', async () => {
-    const candidate = await runDoctor({ requestedRole: 'candidate-cat' }, dependencies());
-    assert.strictEqual(check(candidate, 'roles.active').status, 'warn');
-    assert.strictEqual(candidate.ready, true);
+  test('treats every installed Role as a runnable package', async () => {
+    const exact = await runDoctor({ requestedRole: 'custom-cat' }, dependencies());
+    assert.strictEqual(check(exact, 'roles.active').status, 'pass');
+    assert.strictEqual(exact.context.activeRole, 'custom-cat');
+    assert.strictEqual(exact.ready, true);
 
-    const candidateAlias = await runDoctor({ requestedRole: 'candidate-alias' }, dependencies());
-    assert.strictEqual(check(candidateAlias, 'roles.active').status, 'fail');
-    assert.strictEqual(candidateAlias.context.activeRole, null);
-    assert.strictEqual(candidateAlias.ready, false);
-
-    const blocked = await runDoctor({ requestedRole: 'blocked-cat' }, dependencies());
-    assert.strictEqual(check(blocked, 'roles.active').status, 'blocked');
-    assert.strictEqual(blocked.context.activeRole, null);
-    assert.strictEqual(blocked.ready, false);
+    const alias = await runDoctor({ requestedRole: 'custom' }, dependencies());
+    assert.strictEqual(check(alias, 'roles.active').status, 'pass');
+    assert.strictEqual(alias.context.activeRole, 'custom-cat');
+    assert.strictEqual(alias.ready, true);
   });
 
-  test('does not require a Driver for a selected Role that cannot enter the runtime', async () => {
-    const report = await runDoctor({ requestedRole: 'browser-cat' }, dependencies({
-      getRoleConfig: roleName => roleName === 'browser-cat'
-        ? { ...roleConfigs['browser-cat'], status: 'blocked' }
-        : roleConfigs[roleName],
-      resolveRuntimeRole: roleName => roleName === 'browser-cat' ? undefined : roleName,
-    }));
+  test('reports a missing Role without enabling a Role-specific Driver requirement', async () => {
+    const report = await runDoctor({ requestedRole: 'missing-cat' }, dependencies());
 
     assert.strictEqual(report.context.activeRole, null);
-    assert.strictEqual(check(report, 'roles.active').status, 'blocked');
+    assert.strictEqual(check(report, 'roles.active').status, 'fail');
     assert.strictEqual(check(report, 'drivers.browser').required, false);
   });
 

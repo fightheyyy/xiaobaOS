@@ -2,10 +2,9 @@ import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ArenaManager } from '../arena/arena-manager';
-import { executeArenaRun, runArenaPipelineWorker } from '../arena/arena-runner';
+import { executeArenaRun } from '../arena/arena-runner';
 import {
   ArenaAllowedRuntime,
-  ArenaDecision,
   ArenaNetworkMode,
   ArenaReviewMode,
   ArenaSandboxEngine,
@@ -15,11 +14,66 @@ import {
 } from '../arena/types';
 import { SkillParser } from '../skills/skill-parser';
 import { PathResolver } from '../utils/path-resolver';
+import { arenaLiveRuntimeContract } from '../arena/live-audit';
+import {
+  runArenaService,
+  runPreparedArena,
+} from '../arena/arena-service';
 
 export function registerArenaCommand(program: Command): void {
   const arenaCmd = program
     .command('arena')
     .description('Arena: trace-grounded agentic eval for XiaoBa skills and roles');
+
+  arenaCmd
+    .command('live-contract')
+    .description('Print the credential-free Barena live execution contract')
+    .requiredOption('--json', 'emit the machine-readable contract')
+    .action(() => {
+      printJson(arenaLiveRuntimeContract());
+    });
+
+  arenaCmd
+    .command('evaluate')
+    .description('Run lightweight Scenario -> Trace -> Finding+Case -> shared Eval')
+    .option('--role <id>', 'installed Role under test; defaults to Base for a Skill')
+    .option('--skill <id>', 'installed Skill under test')
+    .option('--scenario <text>', 'user Scenario goal; UserCat proposes one when omitted')
+    .option('--run-id <id>', 'Arena run id')
+    .option('--turns <n>', 'Scenario turn budget; default 4')
+    .option('--runs <n>', 'Replay runs per generated Case; default 3')
+    .option('--cwd <dir>', 'Runtime working directory')
+    .option('--out <dir>', 'ArenaResult output directory')
+    .action(async (options: LightweightArenaOptions) => {
+      if (!options.role && !options.skill) {
+        throw new Error('arena evaluate requires --role, --skill, or both');
+      }
+      const workingDirectory = path.resolve(
+        options.cwd ?? PathResolver.getProjectRoot(),
+      );
+      const runId = options.runId || `arena-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      const turnBudget = parseOptionalPositiveInt(options.turns, '--turns') ?? 4;
+      const runsPerCase = parseOptionalPositiveInt(options.runs, '--runs') ?? 3;
+      const subject = {
+        subject_id: [options.role || 'base', options.skill].filter(Boolean).join('+'),
+        ...(options.role ? { role_id: options.role } : {}),
+        ...(options.skill ? { skill_id: options.skill } : {}),
+      };
+      const execution = await runArenaService({
+        working_directory: workingDirectory,
+        arena_run_id: runId,
+        subject,
+        ...(options.scenario ? { scenario_goal: options.scenario } : {}),
+        turn_budget: turnBudget,
+        runs_per_case: runsPerCase,
+        ...(options.out ? { out_dir: path.resolve(options.out) } : {}),
+      });
+      printJson({
+        arena_run_id: execution.result.arena_run_id,
+        decision: execution.result.decision,
+        result_path: execution.result_path,
+      });
+    });
 
   arenaCmd
     .command('skill <name>')
@@ -29,12 +83,9 @@ export function registerArenaCommand(program: Command): void {
     .option('--surface <name>', 'surface used by UserCat, default pet')
     .option('--pass-env <name>', 'environment variable name to pass through; repeatable', collectOption, [])
     .option('--workspace-seed <path>', 'directory copied into the clean Arena workspace before execution')
-    .option('--scenario <text>', 'UserCat low-information scenario opening')
-    .option('--message <text>', 'UserCat message; repeatable', collectOption, [])
-    .option('--max-turns <n>', 'max UserCat turns per scenario, default 4')
-    .option('--scenario-count <n>', 'UserCat scenario count for normal Arena eval, default 3')
-    .option('--replay-attempts <n>', 'Reviewer replay attempts, default 3')
-    .option('--max-replay-cases <n>', 'max Inspector cases selected for Reviewer replay, default 2')
+    .option('--scenario <text>', 'Scenario goal; UserCat proposes one when omitted')
+    .option('--max-turns <n>', 'Scenario turn budget, default 4')
+    .option('--replay-attempts <n>', 'shared Eval runs per generated Case, default 3')
     .option('--dry-run', 'write the sandboxed runner command without executing it')
     .option('--allow-unsandboxed', 'debug only: allow execution when no sandbox_shell_command is available')
     .option('--sandbox-engine <engine>', 'macos_seatbelt|linux_bubblewrap|windows_native|local_spawn|none')
@@ -60,11 +111,8 @@ export function registerArenaCommand(program: Command): void {
         passThroughEnv: options.passEnv || [],
         workspaceSeedPath: options.workspaceSeed,
         scenario: options.scenario,
-        messages: options.message || [],
         maxTurns: parseOptionalPositiveInt(options.maxTurns, '--max-turns'),
-        scenarioCount: parseOptionalPositiveInt(options.scenarioCount, '--scenario-count'),
         replayAttempts: parseOptionalPositiveInt(options.replayAttempts, '--replay-attempts'),
-        maxReplayCases: parseOptionalPositiveInt(options.maxReplayCases, '--max-replay-cases'),
         dryRun: options.dryRun === true,
         allowUnsandboxed: options.allowUnsandboxed === true,
         sandbox: parseSandboxOptions(options),
@@ -84,10 +132,10 @@ export function registerArenaCommand(program: Command): void {
         command_kind: result.command_kind,
         clean_runtime_path: result.clean_runtime_path,
         runner_path: result.runner_path,
-        ...(result.scorecard_path && { scorecard_path: result.scorecard_path }),
+        ...(result.result_path && { result_path: result.result_path }),
         ...(result.stdout_path && { stdout_path: result.stdout_path }),
         ...(result.stderr_path && { stderr_path: result.stderr_path }),
-        ...(result.scorecard && { scorecard: result.scorecard }),
+        ...(result.result && { result: result.result }),
       });
     });
 
@@ -145,78 +193,11 @@ export function registerArenaCommand(program: Command): void {
 
   const runCmd = arenaCmd
     .command('run')
-    .description('Create and validate Arena run indexes');
-
-  runCmd
-    .command('create')
-    .description('Create arena/runs/<run-id>/arena-run.json from real evidence refs')
-    .requiredOption('--mode <mode>', 'base_skill|role_skill|role')
-    .requiredOption('--subject <id>', 'Arena subject id or path to arena-manifest.json')
-    .option('--run-id <id>', 'run id')
-    .option('--target-role <id>', 'required for role_skill and role modes')
-    .option('--surface <name>', 'surface used by UserCat, default pet')
-    .requiredOption('--usercat-run <id>', 'UserCat run id')
-    .requiredOption('--usercat-package <path>', 'UserCat run package path')
-    .option('--usercat-trace <path>', 'UserCat trace ref; repeatable', collectOption, [])
-    .option('--trace <path>', 'native runtime trace ref; repeatable', collectOption, [])
-    .option('--inspector <path>', 'Inspector candidate case / issue ref; repeatable', collectOption, [])
-    .requiredOption('--reviewer-run <id>', 'ReviewerCat run id')
-    .requiredOption('--scorecard <path>', 'Reviewer scorecard path')
-    .requiredOption('--report <path>', 'Reviewer report path')
-    .requiredOption('--decision <decision>', 'pass|unstable|reopened|blocked|unsafe')
-    .option('--attempts-planned <n>', 'planned replay attempts')
-    .option('--attempts-completed <n>', 'completed replay attempts')
-    .option('--attempts-pass <n>', 'passing replay attempts')
-    .option('--attempts-fail <n>', 'failing replay attempts')
-    .option('--attempts-blocked <n>', 'blocked replay attempts')
-    .option('--replay-trace <path>', 'fresh replay trace ref; repeatable', collectOption, [])
-    .option('--sandbox-engine <engine>', 'macos_seatbelt|linux_bubblewrap|windows_native|local_spawn|none')
-    .option('--sandbox-mode <mode>', 'metadata_only|read_only|workspace_write')
-    .option('--sandbox-workspace <path>', 'sandbox workspace root')
-    .option('--sandbox-subject-root <path>', 'sandbox subject root')
-    .option('--sandbox-writable <path>', 'sandbox writable root; repeatable', collectOption, [])
-    .option('--network <mode>', 'disabled|enabled')
-    .option('--timeout-ms <n>', 'sandbox command timeout')
-    .option('--summary <text>', 'scorecard summary')
-    .action((options: ArenaRunCreateOptions) => {
-      const traceRefs = nonEmptyList(options.trace, '--trace');
-      const manager = new ArenaManager();
-      const runIndex = manager.createRunIndex({
-        runId: options.runId,
-        reviewMode: parseReviewMode(options.mode),
-        subjectId: options.subject,
-        targetRoleId: options.targetRole,
-        surface: options.surface,
-        usercatRunRef: {
-          run_id: options.usercatRun,
-          package_path: options.usercatPackage,
-          trace_refs: options.usercatTrace?.length ? options.usercatTrace : traceRefs,
-        },
-        traceRefs,
-        inspectorRefs: options.inspector || [],
-        reviewerRef: {
-          run_id: options.reviewerRun,
-          scorecard_path: options.scorecard,
-          report_path: options.report,
-        },
-        replayAttempts: {
-          planned: parseOptionalNonNegativeInt(options.attemptsPlanned, '--attempts-planned'),
-          completed: parseOptionalNonNegativeInt(options.attemptsCompleted, '--attempts-completed'),
-          pass_count: parseOptionalNonNegativeInt(options.attemptsPass, '--attempts-pass'),
-          fail_count: parseOptionalNonNegativeInt(options.attemptsFail, '--attempts-fail'),
-          blocked_count: parseOptionalNonNegativeInt(options.attemptsBlocked, '--attempts-blocked'),
-          trace_refs: options.replayTrace || [],
-        },
-        sandbox: parseSandboxOptions(options),
-        decision: parseDecision(options.decision),
-        scorecardSummary: options.summary,
-      });
-      printJson(runIndex);
-    });
+    .description('Execute the lightweight Arena workflow in a clean runtime');
 
   runCmd
     .command('execute')
-    .description('Run UserCat -> InspectorCat -> ReviewerCat in a clean sandboxed Arena runtime and output a scorecard')
+    .description('Run Scenario -> Trace -> Finding+Case -> shared Eval in a clean runtime')
     .requiredOption('--mode <mode>', 'base_skill|role_skill|role')
     .requiredOption('--subject <id>', 'Arena subject id or path to arena-manifest.json')
     .option('--run-id <id>', 'run id')
@@ -224,12 +205,9 @@ export function registerArenaCommand(program: Command): void {
     .option('--surface <name>', 'surface used by UserCat, default pet')
     .option('--pass-env <name>', 'environment variable name to pass through; repeatable', collectOption, [])
     .option('--workspace-seed <path>', 'directory copied into the clean Arena workspace before execution')
-    .option('--scenario <text>', 'UserCat low-information scenario opening')
-    .option('--message <text>', 'UserCat message; repeatable', collectOption, [])
-    .option('--max-turns <n>', 'max UserCat turns per scenario, default 4')
-    .option('--scenario-count <n>', 'UserCat scenario count for normal Arena eval, default 3')
-    .option('--replay-attempts <n>', 'Reviewer replay attempts, default 3')
-    .option('--max-replay-cases <n>', 'max Inspector cases selected for Reviewer replay, default 2')
+    .option('--scenario <text>', 'Scenario goal; UserCat proposes one when omitted')
+    .option('--max-turns <n>', 'Scenario turn budget, default 4')
+    .option('--replay-attempts <n>', 'shared Eval runs per generated Case, default 3')
     .option('--dry-run', 'write the sandboxed runner command without executing it')
     .option('--allow-unsandboxed', 'debug only: allow execution when no sandbox_shell_command is available')
     .option('--sandbox-engine <engine>', 'macos_seatbelt|linux_bubblewrap|windows_native|local_spawn|none')
@@ -249,41 +227,38 @@ export function registerArenaCommand(program: Command): void {
         passThroughEnv: options.passEnv || [],
         workspaceSeedPath: options.workspaceSeed,
         scenario: options.scenario,
-        messages: options.message || [],
         maxTurns: parseOptionalPositiveInt(options.maxTurns, '--max-turns'),
-        scenarioCount: parseOptionalPositiveInt(options.scenarioCount, '--scenario-count'),
         replayAttempts: parseOptionalPositiveInt(options.replayAttempts, '--replay-attempts'),
-        maxReplayCases: parseOptionalPositiveInt(options.maxReplayCases, '--max-replay-cases'),
         dryRun: options.dryRun === true,
         allowUnsandboxed: options.allowUnsandboxed === true,
         sandbox: parseSandboxOptions(options),
       });
-      printJson(result.scorecard || result);
+      printJson(result.result || result);
     });
 
   runCmd
     .command('worker')
-    .description('Internal Arena worker: run the trace-grounded UserCat/InspectorCat/ReviewerCat pipeline in the clean runtime')
+    .description('Internal Arena worker for the lightweight shared-core workflow')
     .requiredOption('--run-id <id>', 'run id prepared by arena run execute')
-    .option('--scenario <text>', 'UserCat low-information scenario opening')
-    .option('--message <text>', 'UserCat message; repeatable', collectOption, [])
-    .option('--max-turns <n>', 'max UserCat turns per scenario')
-    .option('--scenario-count <n>', 'UserCat scenario count')
-    .option('--replay-attempts <n>', 'Reviewer replay attempts')
-    .option('--max-replay-cases <n>', 'max Inspector cases selected for Reviewer replay')
-    .option('--timeout-ms <n>', 'per-turn replay timeout')
+    .option('--scenario <text>', 'Scenario goal')
+    .option('--max-turns <n>', 'Scenario turn budget')
+    .option('--replay-attempts <n>', 'shared Eval runs per generated Case')
     .action(async (options: ArenaRunWorkerOptions) => {
-      const scorecard = await runArenaPipelineWorker({
-        runId: options.runId,
+      const execution = await runPreparedArena({
+        project_root: PathResolver.getProjectRoot(),
+        run_id: options.runId,
         scenario: options.scenario,
-        messages: options.message || [],
-        maxTurns: parseOptionalPositiveInt(options.maxTurns, '--max-turns'),
-        scenarioCount: parseOptionalPositiveInt(options.scenarioCount, '--scenario-count'),
-        replayAttempts: parseOptionalPositiveInt(options.replayAttempts, '--replay-attempts'),
-        maxReplayCases: parseOptionalPositiveInt(options.maxReplayCases, '--max-replay-cases'),
-        timeoutMs: parseOptionalPositiveInt(options.timeoutMs, '--timeout-ms'),
+        max_turns: parseOptionalPositiveInt(options.maxTurns, '--max-turns'),
+        replay_attempts: parseOptionalPositiveInt(options.replayAttempts, '--replay-attempts'),
       });
-      printJson(scorecard);
+      printJson(execution.result);
+      if (process.env.XIAOBA_ARENA_SANDBOXED === '1') {
+        // The internal worker has persisted every result at this point. Exit
+        // after stdout flush so provider/client keep-alive handles cannot hold
+        // the outer Arena command open until its coarse process timeout.
+        await flushStdout();
+        process.exit(0);
+      }
     });
 
   const runtimeCmd = arenaCmd
@@ -323,6 +298,12 @@ export function registerArenaCommand(program: Command): void {
     });
 }
 
+function flushStdout(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    process.stdout.write('', error => error ? reject(error) : resolve());
+  });
+}
+
 interface ImportSubjectOptions {
   trust?: string;
   allowedRuntime?: string;
@@ -342,28 +323,15 @@ interface ArenaSandboxOptionSet {
   timeoutMs?: string;
 }
 
-interface ArenaRunCreateOptions extends ArenaSandboxOptionSet {
-  mode: string;
-  subject: string;
+interface LightweightArenaOptions {
+  role?: string;
+  skill?: string;
+  scenario?: string;
   runId?: string;
-  targetRole?: string;
-  surface?: string;
-  usercatRun: string;
-  usercatPackage: string;
-  usercatTrace?: string[];
-  trace?: string[];
-  inspector?: string[];
-  reviewerRun: string;
-  scorecard: string;
-  report: string;
-  decision: string;
-  attemptsPlanned?: string;
-  attemptsCompleted?: string;
-  attemptsPass?: string;
-  attemptsFail?: string;
-  attemptsBlocked?: string;
-  replayTrace?: string[];
-  summary?: string;
+  turns?: string;
+  runs?: string;
+  cwd?: string;
+  out?: string;
 }
 
 interface ArenaRuntimePrepareOptions extends ArenaSandboxOptionSet {
@@ -385,11 +353,8 @@ interface ArenaRunExecuteOptions extends ArenaSandboxOptionSet {
   passEnv?: string[];
   workspaceSeed?: string;
   scenario?: string;
-  message?: string[];
   maxTurns?: string;
-  scenarioCount?: string;
   replayAttempts?: string;
-  maxReplayCases?: string;
   dryRun?: boolean;
   allowUnsandboxed?: boolean;
 }
@@ -401,11 +366,8 @@ interface ArenaSkillEvaluateOptions extends ArenaSandboxOptionSet {
   passEnv?: string[];
   workspaceSeed?: string;
   scenario?: string;
-  message?: string[];
   maxTurns?: string;
-  scenarioCount?: string;
   replayAttempts?: string;
-  maxReplayCases?: string;
   dryRun?: boolean;
   allowUnsandboxed?: boolean;
 }
@@ -413,12 +375,8 @@ interface ArenaSkillEvaluateOptions extends ArenaSandboxOptionSet {
 interface ArenaRunWorkerOptions {
   runId: string;
   scenario?: string;
-  message?: string[];
   maxTurns?: string;
-  scenarioCount?: string;
   replayAttempts?: string;
-  maxReplayCases?: string;
-  timeoutMs?: string;
 }
 
 function collectOption(value: string, previous: string[]): string[] {
@@ -427,6 +385,10 @@ function collectOption(value: string, previous: string[]): string[] {
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function safeSegment(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/^_+|_+$/g, '') || 'arena';
 }
 
 function resolveInstalledSkillPath(projectRoot: string, value: string): string {
@@ -580,12 +542,6 @@ function parseReviewMode(value: string): ArenaReviewMode {
   throw new Error(`invalid review mode: ${value}`);
 }
 
-function parseDecision(value: string): ArenaDecision {
-  const allowed: ArenaDecision[] = ['pass', 'unstable', 'reopened', 'blocked', 'unsafe'];
-  if (allowed.includes(value as ArenaDecision)) return value as ArenaDecision;
-  throw new Error(`invalid decision: ${value}`);
-}
-
 function parseSandboxOptions(options: ArenaSandboxOptionSet): PrepareArenaRuntimeInput['sandbox'] {
   const sandbox: PrepareArenaRuntimeInput['sandbox'] = {};
   if (options.sandboxEngine) sandbox.engine = parseSandboxEngine(options.sandboxEngine);
@@ -633,12 +589,4 @@ function parseOptionalPositiveInt(value: string | undefined, name: string): numb
     throw new Error(`${name} must be a positive integer`);
   }
   return parsed;
-}
-
-function nonEmptyList(values: string[] | undefined, name: string): string[] {
-  const normalized = (values || []).map(value => value.trim()).filter(Boolean);
-  if (normalized.length === 0) {
-    throw new Error(`${name} is required at least once`);
-  }
-  return normalized;
 }

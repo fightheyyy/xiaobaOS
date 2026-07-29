@@ -86,15 +86,8 @@ export class RoleResolver {
     return ActiveRoleContext.listAvailableRoles();
   }
 
-  static listManagedRoles(): string[] {
-    return ActiveRoleContext.listManagedRoles();
-  }
-
   static resolveRoleDirectoryName(roleName: string): string | undefined {
     return ActiveRoleContext.resolveRoleDirectoryName(roleName);
   }
 
-  static resolveManagedRoleDirectoryName(roleName: string): string | undefined {
-    return ActiveRoleContext.resolveManagedRoleDirectoryName(roleName);
-  }
 }

@@ -54,46 +54,24 @@ Use $ARGUMENTS.
     assert.strictEqual(skill.metadata.userInvocable, true);
     assert.strictEqual(skill.metadata.autoInvocable, true);
     assert.strictEqual(skill.metadata.maxTurns, 5);
-    assert.strictEqual(skill.metadata.status, 'active');
     assert.strictEqual(skill.content, 'Use $ARGUMENTS.');
   });
 
-  test('parses candidate and blocked lifecycle status and rejects unknown values', () => {
-    const candidatePath = path.join(testRoot, 'skills', 'candidate', 'SKILL.md');
-    writeFile(candidatePath, `---
-name: candidate-skill
-description: Candidate skill
-status: candidate
+  test('ignores obsolete lifecycle frontmatter', () => {
+    for (const legacyStatus of ['candidate', 'active', 'blocked', 'custom']) {
+      const skillPath = path.join(testRoot, 'skills', legacyStatus, 'SKILL.md');
+      writeFile(skillPath, `---
+name: ${legacyStatus}-skill
+description: Legacy metadata should not control runtime loading
+status: ${legacyStatus}
 ---
 
-Candidate content.
+Legacy content.
 `);
-    assert.strictEqual(SkillParser.parse(candidatePath).metadata.status, 'candidate');
-
-    const blockedPath = path.join(testRoot, 'skills', 'blocked', 'SKILL.md');
-    writeFile(blockedPath, `---
-name: blocked-skill
-description: Blocked skill
-status: blocked
----
-
-Blocked content.
-`);
-    assert.strictEqual(SkillParser.parse(blockedPath).metadata.status, 'blocked');
-
-    const invalidPath = path.join(testRoot, 'skills', 'invalid', 'SKILL.md');
-    writeFile(invalidPath, `---
-name: invalid-skill
-description: Invalid skill
-status: enabled
----
-
-Invalid content.
-`);
-    assert.throws(
-      () => SkillParser.parse(invalidPath),
-      /Expected candidate, active, or blocked/,
-    );
+      const skill = SkillParser.parse(skillPath);
+      assert.strictEqual(skill.metadata.name, `${legacyStatus}-skill`);
+      assert.strictEqual(Object.hasOwn(skill.metadata, 'status'), false);
+    }
   });
 
   test('parses the optional Arena output line contract and rejects malformed declarations', () => {
@@ -142,31 +120,6 @@ Invalid.
       () => SkillParser.parse(duplicatePath),
       /prefixes must be unique/,
     );
-  });
-
-  test('updates lifecycle status without changing Skill metadata or instructions', () => {
-    const skillPath = path.join(testRoot, 'skills', 'installed', 'SKILL.md');
-    writeFile(skillPath, `---
-name: installed-skill
-description: Installed from an external repository
-aliases:
-  - installed
----
-
-Keep these instructions intact.
-`);
-
-    SkillParser.updateStatus(skillPath, 'candidate');
-    let skill = SkillParser.parse(skillPath);
-    assert.strictEqual(skill.metadata.status, 'candidate');
-    assert.deepStrictEqual(skill.metadata.aliases, ['installed']);
-    assert.strictEqual(skill.content, 'Keep these instructions intact.');
-
-    SkillParser.updateStatus(skillPath, 'blocked');
-    skill = SkillParser.parse(skillPath);
-    assert.strictEqual(skill.metadata.status, 'blocked');
-    assert.strictEqual(skill.metadata.description, 'Installed from an external repository');
-    assert.strictEqual(skill.content, 'Keep these instructions intact.');
   });
 
   test('parses Claude-style invocable metadata', () => {

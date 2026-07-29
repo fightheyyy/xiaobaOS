@@ -10,7 +10,7 @@ import { SkillManager } from '../../../skills/skill-manager';
 import { ToolManager } from '../../../tools/tool-manager';
 import { Message } from '../../../types';
 import { ArtifactManifestItem, Tool, ToolDefinition, ToolExecutionContext } from '../../../types/tool';
-import { AIService } from '../../../utils/ai-service';
+import { AIService, runWithArenaAuditScope } from '../../../utils/ai-service';
 import { RoleResolver } from '../../../utils/role-resolver';
 import { visibleHistoryFileName } from '../../../utils/visible-history-paths';
 
@@ -489,18 +489,24 @@ export class UserTraceRunTool implements Tool {
           session_key: sessionKey,
         });
 
-        const response = await fetch(`${server.baseUrl}/api/pet/message`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            petId,
-            sessionKey,
-            text: userMessage,
-            source: 'dashboard',
-            eventId: `${input.runId}-turn-${index + 1}`,
-          }),
-        });
-        const events = await readSseResponse(response);
+        const { response, events } = await runWithArenaAuditScope(
+          services.aiService,
+          `${input.runId}:target:${index + 1}`,
+          async () => {
+            const response = await fetch(`${server.baseUrl}/api/pet/message`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                petId,
+                sessionKey,
+                text: userMessage,
+                source: 'dashboard',
+                eventId: `${input.runId}-turn-${index + 1}`,
+              }),
+            });
+            return { response, events: await readSseResponse(response) };
+          },
+        );
         if (!response.ok) {
           throw new Error(`dashboard_chat message failed: ${JSON.stringify(events[0] || {})}`);
         }
@@ -636,11 +642,15 @@ export class UserTraceRunTool implements Tool {
           entrypoint: 'agent_session',
         });
 
-        const result = await session.handleMessage(userMessage, {
-          callbacks,
-          surface: 'cli',
-          logInput: userMessage,
-        });
+        const result = await runWithArenaAuditScope(
+          services.aiService,
+          `${input.runId}:target:${index + 1}`,
+          () => session.handleMessage(userMessage, {
+            callbacks,
+            surface: 'cli',
+            logInput: userMessage,
+          }),
+        );
         const assistantText = result.text || streamedText || '';
         turns.push({
           index: index + 1,
@@ -694,7 +704,7 @@ export class UserTraceRunTool implements Tool {
 
 function defaultCreateServices(input: UserTraceRunServicesInput): AgentServices {
   return {
-    aiService: new AIService(),
+    aiService: new AIService(undefined, { arenaComponent: 'target' }),
     toolManager: new ToolManager(input.cwd, { roleName: input.targetRole, runId: input.runId }),
     skillManager: new SkillManager(input.targetRole),
     roleName: input.targetRole,
@@ -705,8 +715,10 @@ function defaultCreateUserPlanner(): UserTracePlanner {
   const aiService = new AIService({
     temperature: 0.7,
     maxTokens: 500,
-  });
-  return async input => {
+  }, { arenaComponent: 'usercat' });
+  return async input => aiService.withArenaAuditScope(
+    `${input.runId}:usercat:${input.nextTurnIndex}`,
+    async () => {
     const response = await aiService.chat([
       {
         role: 'system',
@@ -748,7 +760,8 @@ function defaultCreateUserPlanner(): UserTracePlanner {
       },
     ]);
     return parsePlannerDecision(response.content || '');
-  };
+    },
+  );
 }
 
 function createDashboardChatServices(input: {
@@ -758,7 +771,7 @@ function createDashboardChatServices(input: {
   sessionKey: string;
 }): AgentServices {
   return {
-    aiService: new AIService(),
+    aiService: new AIService(undefined, { arenaComponent: 'target' }),
     toolManager: createRoleAwareToolManager(
       input.cwd,
       {

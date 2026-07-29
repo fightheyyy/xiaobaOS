@@ -1,7 +1,7 @@
 # Observability & Evidence SPEC
 
 状态：Active
-最后更新：2026-07-22
+最后更新：2026-07-29
 
 本文是顶层架构模块中的 **Observability & Evidence / 观测证据层** spec。它以本地 trace JSONL、durable state 和 artifact evidence 为事实源；当前实现可显式启用一个脱敏 OTLP trace 投影，但不会在本地 trace/log 写入前做清洗。
 
@@ -105,7 +105,7 @@ Current implementation:
 - Standalone `ConversationRunner` can still record local metrics directly because it has no owning session log.
 - `GET /api/observability/summary` returns aggregate and local trace facts derived from local logs, with raw prompt/tool preview attributes removed and sensitive freeform values such as paths/tokens redacted at the Dashboard API boundary.
 - `GET /api/observability/review` returns readonly local observability state; it does not generate candidates, continuity reports, or benchmark source.
-- `check:benchmarks` guards active benchmark manifest references; observability has no eval source acceptance path.
+- `test:check-scripted-runtime` guards deterministic Test fixture references; observability has no Test/Eval source acceptance path.
 - `src/roles/evolution-cat/evolution-observer.ts` reads terminal rows from all local session/subagent `traces.jsonl`, filters by row timestamp, excludes self-run/test/replay evidence, and atomically derives `output/evolution/sleep/<date>/digest.json` with stable trace refs. Runtime builds it once and hands it to InspectorCat as the first model stage; the digest is a bounded projection, not a new truth source or evaluation result.
 
 ## Target Architecture
@@ -117,8 +117,8 @@ flowchart LR
         Snapshots["context-snapshots<br/>compact-after state"]
         RuntimeLog["runtime.log<br/>human debug"]
         Artifacts["artifact evidence"]
-        RoleBench["role benchmark source"]
-        RuntimeBench["runtime harness source"]
+        Cases["Case / CaseSet"]
+        TestFixtures["Scripted Runtime Test source"]
     end
 
     subgraph Obs["Observability Evidence"]
@@ -133,7 +133,7 @@ flowchart LR
         Debug["Local debug"]
         SleepDigest["nightly evolution digest<br/>derived refs only"]
         Inspector["InspectorCat<br/>diagnosis input"]
-        LiveEval["Live Agent Eval<br/>curated source only"]
+        AgentEval["Agent Eval<br/>Case Replay"]
         Collector["OTLP collector<br/>Barena / LangWatch / APM"]
     end
 
@@ -148,8 +148,8 @@ flowchart LR
     JSONL --> SleepDigest
     SleepDigest --> Inspector
     Obs --> Debug
-    RuntimeBench --> LiveEval
-    RoleBench --> LiveEval
+    Cases --> AgentEval
+    TestFixtures --> TestRun["Scripted Runtime Test"]
 ```
 
 Target rules:
@@ -158,11 +158,11 @@ Target rules:
 - Local runtime facts enter observability through `traces.jsonl` projection when a session log exists; the local trace log is raw local evidence before persistence.
 - Context compression must leave a structured `context_compaction` event in `traces.jsonl`; successful compactions must store the compact-after messages as local snapshot evidence next to the owning session log. These snapshots are evidence/restoration anchors, not default prompt material for replay.
 - Direct runtime metric recording is allowed only for standalone runners or explicit local-summary helper paths.
-- A trace-derived benchmark asset must be created explicitly by a benchmark owner; observability does not propose, accept, score, or patch benchmark source.
+- A Trace-derived Case must be created explicitly by InspectorCat or another Evaluation caller; observability does not propose, accept, score, or patch Case source.
 - A nightly evolution digest is a bounded, local, read-only projection over terminal trace rows. It keeps stable source refs and may summarize user/tool/artifact facts, but it is not a second trace truth and cannot create, accept, score, publish or promote a candidate.
 - Harvest filters by each trace row timestamp rather than only the enclosing date directory, so long-lived sessions crossing midnight remain correct. Evolution sleep traces, replay/eval traces and deterministic zero-model-call harness rows are excluded from future mining; Trace Replay always appends runtime-owned replay provenance even when its caller supplies a custom session key.
-- Runtime harness owns runtime/contract regression decisions.
-- Roles own role-specific replay, rubric and benchmark admission.
+- Test owns runtime/contract correctness decisions.
+- Shared Evaluation owns Case Replay, Verifier and ReviewerCat semantic judgment.
 - Dashboard stays read-only for observability summary/review state; network-facing summary responses default to a redacted projection even when the in-process local summary retains explicit local preview facts.
 - OTLP trace export is an optional lossy projection, never a second evidence truth. It exports span topology and bounded scalar attributes only; prompt/tool/file previews, raw traceparent and free-form error text stay local.
 - Export failure is fail-open for Agent execution and must be visible through exporter health state without changing runtime outcomes.
@@ -170,11 +170,11 @@ Target rules:
 
 ## Contracts
 
-Stable public replay/eval commands:
+Stable public evidence/Test commands:
 
 - `npm run replay:trace`
-- `npm run eval:base-runtime`
-- `npm run eval:gate`
+- `npm run test:base-runtime`
+- `npm run test:check-scripted-runtime`
 
 Stable OTel configuration:
 
@@ -188,6 +188,7 @@ Stable OTel configuration:
 Stable generated roots:
 
 - `output/replay/**`
+- `output/test/**`
 - `output/eval/**`
 
 Local invariants:
@@ -209,6 +210,7 @@ logs/sessions/<surface>/<date>/<session-id>/
 data/chat/sessions/**
 memory/**
 output/replay/**
+output/test/**
 output/eval/**
 ```
 

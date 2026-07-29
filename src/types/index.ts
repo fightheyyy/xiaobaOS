@@ -85,7 +85,6 @@ export interface CommandOptions {
 
 // 导出 Agent 相关类型
 export * from './agent';
-export * from './capability-status';
 export * from './role';
 export * from './tool';
 export * from './skill';

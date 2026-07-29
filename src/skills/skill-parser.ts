@@ -1,21 +1,11 @@
 import * as fs from 'fs';
 import matter from 'gray-matter';
 import { Skill, SkillMetadata } from '../types/skill';
-import { CapabilityStatus, parseCapabilityStatus } from '../types/capability-status';
 
 /**
  * Skill 解析器
  */
 export class SkillParser {
-  static updateStatus(filePath: string, status: CapabilityStatus): void {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const parsed = matter(raw);
-    fs.writeFileSync(filePath, matter.stringify(parsed.content, {
-      ...parsed.data,
-      status,
-    }), 'utf-8');
-  }
-
   /**
    * 解析 SKILL.md 文件（支持多种格式）
    * @param filePath - SKILL.md 文件路径
@@ -67,7 +57,6 @@ export class SkillParser {
         ? data.toolsets.filter((toolset: unknown): toolset is string => typeof toolset === 'string')
         : undefined,
       arenaOutputLinePrefixes: this.parseArenaOutputLinePrefixes(data, filePath),
-      status: parseCapabilityStatus(data.status, `skill ${data.name}`),
     };
 
     if (!this.validate(metadata)) {
@@ -103,7 +92,6 @@ export class SkillParser {
         ? data.toolsets.filter((toolset: unknown): toolset is string => typeof toolset === 'string')
         : undefined,
       arenaOutputLinePrefixes: this.parseArenaOutputLinePrefixes(data, filePath),
-      status: parseCapabilityStatus(data.status, `skill ${data.name}`),
     };
 
     if (!this.validate(metadata)) {

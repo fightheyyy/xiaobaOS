@@ -2,7 +2,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { runEvalSuite, writeEvalScorecard, type EvalDecision, type EvalScorecard } from '../src/eval';
+import {
+  runScriptedRuntimeTestSuite,
+  writeScriptedRuntimeTestResult,
+  type TestDecision,
+  type ScriptedRuntimeTestResult,
+} from '../src/testing';
 
 interface CliOptions {
   outDir?: string;
@@ -19,7 +24,7 @@ interface ContractSmokeItem {
 interface ContractSmokeResult {
   id: string;
   name: string;
-  decision: EvalDecision;
+  decision: TestDecision;
   cases_total: number;
   cases_passed: number;
   hard_failures: number;
@@ -77,7 +82,7 @@ async function main(): Promise<void> {
   const results: ContractSmokeResult[] = [];
   for (const item of CONTRACT_SMOKE_ITEMS) {
     try {
-      const scorecard = writeEvalScorecard(await runEvalSuite({
+      const scorecard = writeScriptedRuntimeTestResult(await runScriptedRuntimeTestSuite({
         suitePath: path.resolve(item.suitePath),
         outDir: path.join(outDir, item.outSubdir),
       }), path.join(outDir, item.outSubdir));
@@ -145,7 +150,10 @@ function parseArgs(args: string[]): CliOptions {
   return { outDir, allowFail };
 }
 
-function resultFromScorecard(item: ContractSmokeItem, scorecard: EvalScorecard): ContractSmokeResult {
+function resultFromScorecard(
+  item: ContractSmokeItem,
+  scorecard: ScriptedRuntimeTestResult,
+): ContractSmokeResult {
   return {
     id: item.id,
     name: item.name,
@@ -160,7 +168,7 @@ function resultFromScorecard(item: ContractSmokeItem, scorecard: EvalScorecard):
 }
 
 function summarize(results: ContractSmokeResult[]): {
-  decision: EvalDecision;
+  decision: TestDecision;
   items_total: number;
   items_passed: number;
   cases_total: number;

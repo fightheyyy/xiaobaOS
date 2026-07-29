@@ -62,7 +62,7 @@ echo "Output: ${OUTPUT_DIR}"
 npm run build
 npm test
 npm run test:contract-smoke
-npm run check:benchmarks
+npm run test:check-scripted-runtime
 npx electron-builder --mac dmg --arm64 --publish never --config.directories.output="$OUTPUT_DIR"
 
 if [[ ! -f "$DMG_PATH" ]]; then

@@ -1,7 +1,7 @@
 {
   "name": "user-cat",
   "displayName": "UserCat",
-  "description": "Low-information realistic user pressure role for producing candidate multi-turn traces, not judging or accepting benchmarks.",
+  "description": "Narrow realistic end-user simulator that produces one natural turn at a time and never judges evidence or target quality.",
   "promptFile": "user-system-prompt.md",
   "aliases": [
     "user",
@@ -11,15 +11,9 @@
   ],
   "inheritBaseSkills": false,
   "inheritBaseTools": false,
-  "baseToolAllowlist": [
-    "read_file",
-    "grep",
-    "glob",
-    "skill"
-  ],
+  "baseToolAllowlist": [],
   "metadata": {
-    "toolPolicy": "user_trace_run-candidate-trace-production-only",
-    "intakeOwner": "inspector-cat",
-    "benchmarkAcceptance": "forbidden"
+    "toolPolicy": "one-natural-user-turn-or-explicit-live-trace",
+    "promptProvenance": "Adapted from langwatch/scenario UserSimulatorAgent (Apache-2.0)"
   }
 }

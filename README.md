@@ -5,7 +5,7 @@
 
   **会交付、可复盘、能受控进化的 IM-native AI 同事 Runtime。**
 
-  把任务发进 CLI、IM 或桌面端。Base 负责沟通与派工，专业 Role 接管执行，再把文件、消息和可检查证据交付回来；真实 trace 可以沉淀候选能力，但只有经过 Arena 验收并由人显式晋升后才进入生产。
+  把任务发进 CLI、IM 或桌面端。Base 负责沟通与派工，专业 Role 接管执行，再把文件、消息和可检查证据交付回来；真实 Trace 可以回归成 Case，候选能力复用 Test + Eval 验收。
 
   <em>像同事一样完成工作，像软件一样验收进化。</em>
 
@@ -52,9 +52,9 @@ flowchart LR
 
     subgraph ImprovementRoles["5) 持续改进 Roles"]
         direction TB
-        User["UserCat<br/>用户视角评测"]
-        Inspector["InspectorCat<br/>问题识别与分类"]
-        Reviewer["ReviewerCat<br/>独立回放与验收"]
+        User["UserCat<br/>模拟真实用户"]
+        Inspector["InspectorCat<br/>Finding + Case"]
+        Reviewer["ReviewerCat<br/>共享 Agentic Judge"]
         Evolution["EvolutionCat<br/>记忆 · Skill · Role 演进"]
     end
 
@@ -67,21 +67,21 @@ flowchart LR
     Browser --> Trace
     Gui --> Trace
     Secretary --> Trace
-    Trace --> User
     Trace --> Inspector
-    Trace --> Reviewer
     Trace --> Evolution
+    User --> Trace
+    Inspector --> Reviewer
 ```
 
-这张图表达责任拓扑，不表示四个改进 Role 每次都会顺序执行；真实进化流程按 trace 证据和类型化 route 选择参与者。
+这张图表达责任拓扑，不表示四个改进 Role 每次都会顺序执行。
 
 | 工作闭环 | 进化闭环 |
 | --- | --- |
-| 消息 → Base 派工 → 专业 Role 接管 → 工具执行 → 文件 / 消息交付 | 真实 trace → Inspector 诊断 → Candidate Skill / Role → Arena 复跑与 scorecard → 人显式晋升 |
+| 消息 → Base 派工 → 专业 Role 接管 → 工具执行 → 文件 / 消息交付 | Trace / Case → Candidate → shared Test + Eval → capability 新 Session / code 下一进程激活 |
 
 - **证据优先**：模型调用、工具结果、artifact、delivery 和失败进入 trace；角色自述不等于完成证据。
-- **职责分离**：诊断、生成候选、工程修复、正式回放和 Arena 验收由不同责任边界承担。
-- **候选不自动上线**：证据不足可以 `no_op`，评测失败可以阻断；Arena `pass` 也不会自动修改生产资产。
+- **职责分离**：Inspector 发现问题，Engineer/Evolution 生成 Candidate，Verifier/Reviewer 负责裁决。
+- **单一真相**：一次 Case execution 只有一个 `pass / fail / blocked` Outcome；Report 只展示。
 
 ## 能做什么
 
@@ -150,10 +150,10 @@ Base Main Agent 是唯一面向用户的沟通和调度入口。八个 Role 复�
 | 执行 | BrowserCat | 受限、可验证的浏览器接管 |
 | 执行 | GuiCat | macOS 桌面 GUI 接管 |
 | 执行 | SecretaryCat | 飞书工作流；`FeishuCat` 是别名，领域能力来自官方 `lark-cli` |
-| 改进 | UserCat | 用低信息、真实用户式交互给候选能力施压并产出 trace |
-| 改进 | InspectorCat | 从 trace、工具事实和 artifact 中诊断问题并输出类型化 route |
-| 改进 | EvolutionCat | 把可泛化模式沉淀为候选 Skill / Role；持有 `remember` 与发布工作流 |
-| 改进 | ReviewerCat | 在干净 session 正式回放单个 Replay Case，输出终态结论 |
+| 改进 | UserCat | 在 Arena 中像普通用户一样与被测 Agent 互动；缺省时生成 Scenario |
+| 改进 | InspectorCat | 把 Trace 中的问题变成有证据的 Finding + executable Case |
+| 改进 | EvolutionCat | 生成 Role / Skill / Memory Candidate；持有 `remember` |
+| 改进 | ReviewerCat | 作为共享 Agentic Judge 判断通过硬检查的 Case runs |
 
 Browser、GUI 和飞书 driver 只提供确定性能力，不启动第二套 Chat、Agent 或 MCP loop。详细用法见 [Roles Guide](roles/README.md) 和 [Skills Guide](skills/README.md)。
 
@@ -161,18 +161,21 @@ EngineerCat 同样不包装第二套 coding-agent runtime：Base 在外部管理
 
 ## 受控进化
 
-夜间 workflow 先由 Runtime 从真实 session trace 生成只读 Digest，再以 InspectorCat 作为第一个模型角色做证据诊断，并将 finding 路由到 `evolution`、`repair`、`replay` 或 `no_op`。内部 Role 按 route 参与，不是每晚固定跑一条“八猫流水线”。
+Evolution 是轻量控制 DAG，不拥有另一套评测系统：
 
-<p align="center">
-  <img src="assets/self-evolution-dag.png" alt="xiaobaOS Self-Evolution DAG：证据采集、决策路由、候选生成、隔离验收与结果五个阶段" width="100%">
-</p>
+```mermaid
+flowchart LR
+    Input["Trace or Case"] --> Inspector["InspectorCat<br/>Trace only"]
+    Inspector --> Pair["Finding + Case"]
+    Input -->|Case| Pair
+    Pair --> Owner["EngineerCat or EvolutionCat"]
+    Owner --> Candidate["Candidate"]
+    Candidate --> Test["shared Test"]
+    Test --> Eval["shared Eval"]
+    Eval -->|pass| Activate["capability: new Session<br/>code: next process"]
+```
 
-| Route | 执行 | 验收终点 |
-| --- | --- | --- |
-| `evolution` | EvolutionCat 生成 Skill / Role，并落入隔离 Candidate | Arena 在 clean runtime 中做多场景能力验收；通过后仍需人显式执行 Candidate → Active |
-| `repair` | EngineerCat 生成隔离 Patch Candidate | ReviewerCat 执行 Frozen Replay 并返回 `closed / next_run / blocked`；影响 Agent 行为时再进入 Arena 复审 |
-| `replay` | ReviewerCat 直接执行冻结的 Replay Case | 返回 `closed / next_run / blocked`，同一次 DAG 不回跳修复 |
-| `no_op` | 信号不足时不生成改进 | 显式终止，不伪装成进化 |
+Arena 是独立的 Agentic Eval：从 Scenario 开始，UserCat 与 Subject 产生普通 Trace，InspectorCat 把反例回归成 Case，再交给同一个 Eval。它不是 Candidate promotion gate。
 
 ```bash
 # 运行一次夜间演化
@@ -181,12 +184,12 @@ xiaoba evolution sleep
 # 在隔离 Arena 中验收一个已安装或已导入的 skill
 xiaoba arena skill <skill-name>
 
-# Arena 通过后，显式晋升同日 DAG 绑定的不可变 Candidate
-xiaoba evolution promote --date YYYY-MM-DD --confirm <candidate-name>
+# 新的轻量 Arena：可传 Scenario，也可让 UserCat 自动生成
+xiaoba arena evaluate --role engineer-cat --scenario "帮我修好这个项目"
+
 ```
 
-Arena 固定支持 `base + skill`、`role + skill` 和 `role` 三种 review mode。Candidate 可以保持候选或被阻断；生产晋升始终需要明确的人类动作。
-声明固定逐行合同的 Candidate，只有 native / replay 的每个 turn 都绑定同一 subject 且全轮通过，才可能得到 `pass`。
+`evolution sleep`、`arena evaluate`、`arena skill` 和 `arena run execute` 已进入共享轻量核心；旧 Arena scorecard worker、typed Evolution DAG、manual Promote、patch regression 以及 Dashboard/loader capability lifecycle 均已删除。真实进度见 [Project PLAN](docs/PLAN.md)。
 
 ## 证据与验收
 
@@ -194,15 +197,18 @@ Arena 固定支持 `base + skill`、`role + skill` 和 `role` 三种 review mode
 | --- | --- |
 | Trace | 保存一次请求中的模型、工具、失败、交付和 runtime event |
 | Artifact / Delivery Evidence | 记录文件、消息、外部回执和实际交付结果 |
-| Trace Replay | 用历史用户意图重新驱动当前 runtime，观察行为是否变化 |
-| Live Agent Eval | 对 curated case fresh-run 当前 runtime，并运行 hard verifier |
-| Arena | 在 clean runtime 中验收候选能力，输出可审计 scorecard |
+| Replay | 执行 Case，重新驱动当前 Agent，并产生 fresh Trace；本身不裁决 |
+| Eval | Verifier 做硬检查，ReviewerCat 做语义判断，产生唯一 Outcome |
+| Arena | UserCat 场景探索 → Inspector Finding+Case → shared Eval |
 
 ```bash
 npm test
 npm run replay:trace
-npm run eval:base-runtime
-npm run check:benchmarks
+npm run test:base-runtime
+npm run test:check-scripted-runtime
+
+# 维护中的真实 Agent 行为评测（默认只读 Replay）
+xiaoba eval run --case-set eval/case-sets/xiaoba-core-readonly.json
 ```
 
 XiaoBa 可以把同一组 session / model / tool span 通过 OTLP/HTTP protobuf 发给 Barena、LangWatch 或普通 OTel Collector。导出默认关闭，本地 `traces.jsonl` 仍是权威证据；prompt、tool args、file content 和自由文本错误不会进入外部 span。
@@ -222,7 +228,7 @@ xiaoba chat
 - BrowserCat、GuiCat 和 SecretaryCat 依赖对应 driver / CLI，以及必要的安装、权限或登录状态；可先运行 `xiaoba doctor` 检查。
 - Preview 默认关闭尚未完成端到端验证的自动更新通道，新版本通过 GitHub Release 手动安装。
 - Dashboard、Pet 和 Bridge 主要面向本机使用，尚未完成不可信网络下的完整认证与 Owner 授权。
-- Trace Replay 可能执行当前真实 side effect；在隔离完成前，不应无审查批量复跑任意历史 trace。
+- Case Replay 默认只允许读取；需要写入的 Case 必须显式声明 `workspace_write`，且只能在 enforced clean runtime 中运行。当前原生写沙箱只支持 macOS，其他平台 fail closed。
 
 ## 文档与社区
 

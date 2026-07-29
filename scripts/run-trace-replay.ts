@@ -1,4 +1,8 @@
 import { runTraceReplay, renderTraceReplayReport } from '../src/replay/trace-replay-runner';
+import {
+  createReplayServices,
+  ReplaySandboxMode,
+} from '../src/replay/replay-services';
 
 interface CliOptions {
   trace?: string;
@@ -9,9 +13,10 @@ interface CliOptions {
   maxTurns?: number;
   timeoutMs?: number;
   source?: string;
-  readOnly?: boolean;
+  sandboxMode?: ReplaySandboxMode;
   parentSessionId?: string;
   role?: string;
+  requiredActiveSkillName?: string;
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -44,12 +49,21 @@ function parseArgs(argv: string[]): CliOptions {
       options.source = next;
       index++;
     } else if (arg === '--read-only') {
-      options.readOnly = true;
+      options.sandboxMode = 'read_only';
+    } else if (arg === '--sandbox-mode') {
+      if (next !== 'read_only' && next !== 'workspace_write') {
+        throw new Error('--sandbox-mode must be read_only or workspace_write');
+      }
+      options.sandboxMode = next;
+      index++;
     } else if (arg === '--parent-session-id') {
       options.parentSessionId = next;
       index++;
     } else if (arg === '--role') {
       options.role = next;
+      index++;
+    } else if (arg === '--required-active-skill') {
+      options.requiredActiveSkillName = next;
       index++;
     } else if (arg === '--help' || arg === '-h') {
       printHelp();
@@ -82,9 +96,11 @@ function printHelp(): void {
     '  --max-turns <n>       Replay only the first n trace inputs.',
     '  --timeout-ms <n>      Per-turn timeout. Defaults to 180000.',
     '  --source <name>        Replay provenance source.',
-    '  --read-only            Internal mode: expose read_file/grep/glob only.',
-    '  --parent-session-id    Trusted parent id required by --read-only.',
-    '  --role <name>          Optional target role for --read-only.',
+    '  --sandbox-mode <mode>  Internal Case Replay mode: read_only|workspace_write.',
+    '  --read-only            Compatibility alias for --sandbox-mode read_only.',
+    '  --parent-session-id    Trusted parent id required by sandbox mode.',
+    '  --role <name>          Optional target role for sandbox mode.',
+    '  --required-active-skill <name>  Internal evaluator Skill pin.',
   ].join('\n'));
 }
 
@@ -95,11 +111,16 @@ async function main(): Promise<void> {
     throw new Error('--trace is required');
   }
 
-  if (options.readOnly && !options.parentSessionId) {
-    throw new Error('--read-only requires --parent-session-id');
+  if (options.sandboxMode && !options.parentSessionId) {
+    throw new Error('--sandbox-mode requires --parent-session-id');
   }
-  const services = options.readOnly
-    ? await createReadOnlyServices(options.cwd, options.parentSessionId || '', options.role)
+  const services = options.sandboxMode
+    ? await createReplayServices({
+        working_directory: options.cwd || process.cwd(),
+        parent_session_id: options.parentSessionId || '',
+        sandbox_mode: options.sandboxMode,
+        role_name: options.role,
+      })
     : undefined;
 
   const report = await runTraceReplay({
@@ -112,15 +133,11 @@ async function main(): Promise<void> {
     timeoutMs: options.timeoutMs,
     source: options.source,
     services,
+    requiredActiveSkillName: options.requiredActiveSkillName,
   });
 
   console.log(renderTraceReplayReport(report));
   console.log(`Artifacts: ${report.out_dir}`);
-}
-
-async function createReadOnlyServices(cwd: string | undefined, parentSessionId: string, role?: string) {
-  const { createReadOnlyReplayServices } = await import('../src/roles/reviewer-cat/tools/trace-replay-tool');
-  return createReadOnlyReplayServices(cwd || process.cwd(), parentSessionId, role);
 }
 
 main().catch(error => {

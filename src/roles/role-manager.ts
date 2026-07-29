@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { RoleConfig } from '../types/role';
-import { CapabilityStatus } from '../types/capability-status';
 import { RoleResolver } from '../utils/role-resolver';
 
 export const DEFAULT_BUNDLED_ROLES = [
@@ -25,7 +24,6 @@ export interface RoleSummary {
   promptFile: string | null;
   path: string;
   active: boolean;
-  status: CapabilityStatus;
   config?: RoleConfig;
 }
 
@@ -38,13 +36,13 @@ export interface RoleRemovalResult {
 
 export class RoleManager {
   static listRoles(): RoleSummary[] {
-    return RoleResolver.listManagedRoles()
+    return RoleResolver.listAvailableRoles()
       .map(roleName => this.getRole(roleName))
       .filter((role): role is RoleSummary => Boolean(role));
   }
 
   static getRole(roleName: string): RoleSummary | undefined {
-    const resolved = RoleResolver.resolveManagedRoleDirectoryName(roleName);
+    const resolved = RoleResolver.resolveRoleDirectoryName(roleName);
     if (!resolved) {
       return undefined;
     }
@@ -62,7 +60,6 @@ export class RoleManager {
       promptFile: config?.promptFile || null,
       path: rolePath,
       active: Boolean(activeRole && RoleResolver.normalizeRoleName(activeRole) === RoleResolver.normalizeRoleName(resolved)),
-      status: config?.status || 'active',
       config,
     };
   }

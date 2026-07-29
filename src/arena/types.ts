@@ -6,22 +6,6 @@ export type ArenaTrustLevel = 'untrusted' | 'review_required' | 'reviewed' | 'pr
 
 export type ArenaAllowedRuntime = 'arena_only' | 'production_candidate' | 'production';
 
-export type ArenaDecision = 'pass' | 'unstable' | 'reopened' | 'blocked' | 'unsafe';
-
-export type ArenaOutputContractStatus = 'pass' | 'not_declared' | 'blocked' | 'fail';
-
-export interface ArenaOutputContractCheck {
-  declared: boolean;
-  source_ref: string | null;
-  expected_turns: number;
-  checked_turns: number;
-  passed_turns: number;
-  violation_count: number;
-  fully_compliant_sessions: number;
-  total_sessions: number;
-  status: ArenaOutputContractStatus;
-}
-
 export type ArenaSandboxEngine =
   | 'macos_seatbelt'
   | 'linux_bubblewrap'
@@ -93,31 +77,6 @@ export interface ArenaSubjectManifest {
   role?: ArenaRoleSnapshot;
 }
 
-export interface ArenaUserCatRunRef {
-  run_id: string;
-  package_path: string;
-  trace_refs?: string[];
-  turn_refs?: string[];
-  seed_ref?: string;
-}
-
-export interface ArenaReviewerRef {
-  run_id: string;
-  scorecard_path: string;
-  report_path: string;
-}
-
-export interface ArenaReplayAttempts {
-  planned: number;
-  completed: number;
-  pass_count: number;
-  fail_count: number;
-  blocked_count: number;
-  trace_refs: string[];
-  case_ids?: string[];
-  source_trace_refs?: string[];
-}
-
 export interface ArenaSandboxPolicy {
   engine: ArenaSandboxEngine;
   mode: ArenaSandboxMode;
@@ -159,6 +118,7 @@ export interface ArenaCleanRuntimeIndex {
   copied: {
     base_skills: string[];
     missing_base_skills: string[];
+    support_roles?: string[];
     subject_skill?: string;
     role?: string;
     workspace_seed?: {
@@ -185,46 +145,6 @@ export interface ArenaTargetProfile {
   registered_tools: string[];
   provider_visible_tools: string[];
   surface: string;
-}
-
-export interface ArenaRunIndex {
-  version: 1;
-  run_id: string;
-  review_mode: ArenaReviewMode;
-  subject_id: string;
-  subject_manifest_path: string;
-  target_profile: ArenaTargetProfile;
-  usercat_run_ref: ArenaUserCatRunRef;
-  trace_refs: string[];
-  inspector_refs: string[];
-  reviewer_ref?: ArenaReviewerRef;
-  replay_attempts: ArenaReplayAttempts;
-  sandbox: ArenaSandboxPolicy;
-  decision: ArenaDecision;
-  scorecard_summary: string;
-  promotion: {
-    production_ref?: string;
-    eval_case_ref?: string;
-    status?: string;
-  };
-  created_at: string;
-}
-
-export interface CreateArenaRunInput {
-  runId?: string;
-  reviewMode: ArenaReviewMode;
-  subjectId: string;
-  targetRoleId?: string;
-  surface?: string;
-  usercatRunRef: ArenaUserCatRunRef;
-  traceRefs: string[];
-  inspectorRefs?: string[];
-  reviewerRef?: ArenaReviewerRef;
-  replayAttempts?: Partial<ArenaReplayAttempts>;
-  sandbox?: Partial<ArenaSandboxPolicy>;
-  decision: ArenaDecision;
-  scorecardSummary?: string;
-  promotion?: ArenaRunIndex['promotion'];
 }
 
 export interface PrepareArenaRuntimeInput {

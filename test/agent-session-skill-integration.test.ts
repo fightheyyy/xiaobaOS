@@ -121,7 +121,7 @@ describe('AgentSession skill integration', () => {
     ));
   });
 
-  test('revokes an activated skill when reload makes it blocked or missing', async () => {
+  test('revokes an activated skill when reload makes it unavailable or missing', async () => {
     const skill: Skill = {
       metadata: {
         name: 'revoked-skill',

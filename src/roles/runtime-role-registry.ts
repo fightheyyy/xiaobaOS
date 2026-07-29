@@ -9,10 +9,6 @@ import { AnalyzeLogTool } from './inspector-cat/tools/analyze-log-tool';
 import { GuideTpcEvalAnalysisTool } from './guide/tools/eval-analysis-tool';
 import { GuideTpcEnvBaselineTool } from './guide/tools/env-baseline-tool';
 import { GuideTpcBaselineTool } from './guide/tools/tpc-baseline-tool';
-import { ReviewerEvalPrepareTool } from './reviewer-cat/tools/reviewer-eval-tool';
-import { ReviewerXiaoBaCliE2ETool } from './reviewer-cat/tools/xiaoba-cli-e2e-tool';
-import { ReviewerModuleTestTool } from './reviewer-cat/tools/module-test-tool';
-import { ReviewerTraceReplayTool } from './reviewer-cat/tools/trace-replay-tool';
 import { ResearchBoardReadTool, ResearchBoardUpdateTool } from './researcher-cat/tools/research-board-tools';
 import { ResearchAutoResearchRunTool } from './researcher-cat/tools/research-auto-run-tool';
 import { FeishuAuthLoginCompleteTool, FeishuAuthLoginStartTool, FeishuAuthStatusTool } from './secretary-cat/tools/feishu-auth-tools';
@@ -189,14 +185,6 @@ function getRoleSpecificToolsForNormalizedRole(normalizedRole: string): Tool[] {
       new FeishuBaseFieldListTool(larkCli),
       new FeishuBaseRecordListTool(larkCli),
       new FeishuBaseRecordUpsertConfirmedTool(larkCli),
-    ];
-  }
-  if (normalizedRole === 'reviewer-cat') {
-    return [
-      new ReviewerEvalPrepareTool(),
-      new ReviewerTraceReplayTool(),
-      new ReviewerXiaoBaCliE2ETool(),
-      new ReviewerModuleTestTool(),
     ];
   }
   return [];

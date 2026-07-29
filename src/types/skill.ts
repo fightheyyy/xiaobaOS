@@ -1,5 +1,3 @@
-import { CapabilityStatus } from './capability-status';
-
 /**
  * Skill 元数据接口
  */
@@ -13,7 +11,6 @@ export interface SkillMetadata {
   maxTurns?: number;               // 最大工具调用轮次（覆盖默认值）
   toolsets?: string[];             // 激活 skill 后请求暴露的 scoped toolsets
   arenaOutputLinePrefixes?: string[]; // Arena 可选逐轮严格文本输出契约
-  status?: CapabilityStatus;       // 生命周期状态（旧资产默认 active）
 }
 
 /**

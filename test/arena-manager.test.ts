@@ -214,7 +214,6 @@ describe('ArenaManager', () => {
       displayName: 'EvidenceReviewCat',
       description: 'Review evidence without changing production assets.',
       promptFile: 'evidence-review-system-prompt.md',
-      status: 'candidate',
       inheritBaseTools: false,
       baseToolAllowlist: ['read_file'],
       metadata: { boundary: 'Arena-only candidate role.' },
@@ -278,72 +277,6 @@ describe('ArenaManager', () => {
     assert.deepStrictEqual(snapshotDirectory(productionRolesRoot), productionBefore);
   });
 
-  test('creates role_skill run index from real UserCat, trace, Inspector and Reviewer refs', () => {
-    const skillManifest = manager.importLocalSkill({
-      skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'patch-helper'), {
-        name: 'patch-helper',
-        description: 'Helps patch files',
-      }),
-    });
-    const refs = writeEvidenceRefs(testRoot);
-
-    const run = manager.createRunIndex({
-      runId: 'role-skill-pass',
-      reviewMode: 'role_skill',
-      subjectId: skillManifest.subject_id,
-      targetRoleId: 'engineer-cat',
-      surface: 'pet',
-      usercatRunRef: {
-        run_id: 'usercat-real-run',
-        package_path: refs.usercatPackage,
-        trace_refs: [refs.nativeTrace],
-      },
-      traceRefs: [refs.nativeTrace],
-      inspectorRefs: [refs.inspectorCase],
-      reviewerRef: {
-        run_id: 'reviewer-pass',
-        scorecard_path: refs.scorecard,
-        report_path: refs.report,
-      },
-      replayAttempts: {
-        planned: 3,
-        completed: 3,
-        pass_count: 3,
-        fail_count: 0,
-        blocked_count: 0,
-        trace_refs: [refs.replayTrace],
-      },
-      decision: 'pass',
-      scorecardSummary: 'stable across replay attempts',
-    });
-
-    assert.strictEqual(run.review_mode, 'role_skill');
-    assert.strictEqual(run.decision, 'pass');
-    assert.strictEqual(run.target_profile.active_role_id, 'engineer-cat');
-    assert.strictEqual(run.target_profile.subject_skill_id, 'patch-helper');
-    assert.ok(run.target_profile.loaded_skills.includes('patch-helper'));
-    assert.ok(run.target_profile.loaded_skills.includes('engineer-helper'));
-    assert.ok(DEFAULT_PACKAGED_BASE_SKILLS.every(skill => run.target_profile.loaded_skills.includes(skill)));
-    assert.ok(run.target_profile.registered_tools.includes('write_file'));
-    assert.ok(run.target_profile.registered_tools.includes('execute_shell'));
-    assert.ok(run.target_profile.provider_visible_tools.includes('read_file'));
-    assert.ok(run.target_profile.provider_visible_tools.includes('execute_shell'));
-    assert.ok(run.target_profile.provider_visible_tools.includes('send_text'));
-    assert.ok(!run.target_profile.provider_visible_tools.includes('write_file'));
-    assert.ok(run.target_profile.provider_visible_tools.every(tool => (
-      run.target_profile.registered_tools.includes(tool)
-    )));
-    assert.deepStrictEqual(run.replay_attempts, {
-      planned: 3,
-      completed: 3,
-      pass_count: 3,
-      fail_count: 0,
-      blocked_count: 0,
-      trace_refs: [refs.replayTrace],
-    });
-    assert.ok(fs.existsSync(path.join(testRoot, 'arena', 'runs', 'role-skill-pass', 'arena-run.json')));
-  });
-
   test('prepares a clean base_skill runtime with only base skills and subject skill', () => {
     const manifest = manager.importLocalSkill({
       skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'rating-skill'), {
@@ -393,13 +326,26 @@ describe('ArenaManager', () => {
       reviewMode: 'base_skill' as const,
       subjectId: manifest.subject_id,
     };
-    const first = manager.prepareCleanRuntime(input);
-    const staleDebug = path.join(first.roots.run_root, 'debug', 'stale-replay.json');
-    writeText(staleDebug, 'stale');
+    const previousLiveMode = process.env.XIAOBA_ARENA_LIVE_MODE;
+    process.env.XIAOBA_ARENA_LIVE_MODE = 'barena';
+    try {
+      const first = manager.prepareCleanRuntime(input);
+      assert.ok(fs.statSync(path.join(first.roots.run_root, 'debug')).isDirectory());
+      assert.ok(fs.statSync(path.join(first.roots.run_root, 'debug', 'provider-calls.ndjson')).isFile());
+      if (first.launch.sandbox_profile_path) {
+        const profile = fs.readFileSync(first.launch.sandbox_profile_path, 'utf-8');
+        assert.ok(profile.includes(fs.realpathSync.native(first.roots.run_root)));
+      }
+      const staleDebug = path.join(first.roots.run_root, 'debug', 'stale-replay.json');
+      writeText(staleDebug, 'stale');
 
-    manager.prepareCleanRuntime(input);
+      manager.prepareCleanRuntime(input);
 
-    assert.ok(!fs.existsSync(staleDebug));
+      assert.ok(!fs.existsSync(staleDebug));
+    } finally {
+      if (previousLiveMode === undefined) delete process.env.XIAOBA_ARENA_LIVE_MODE;
+      else process.env.XIAOBA_ARENA_LIVE_MODE = previousLiveMode;
+    }
   });
 
   test('clean runtime loads project .env without persisting secret values', () => {
@@ -500,6 +446,37 @@ describe('ArenaManager', () => {
     );
   });
 
+  test('copies shared assurance roles into every clean lightweight Arena runtime', () => {
+    for (const roleName of ['user-cat', 'inspector-cat', 'reviewer-cat']) {
+      writeRole(testRoot, roleName, {
+        name: roleName,
+        displayName: roleName,
+        description: `${roleName} support role`,
+        promptFile: 'system.md',
+      });
+    }
+    const manifest = manager.importLocalSkill({
+      skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'assurance-subject'), {
+        name: 'assurance-subject',
+        description: 'Subject for the shared Arena workflow',
+      }),
+    });
+
+    const runtime = manager.prepareCleanRuntime({
+      runId: 'clean-shared-assurance',
+      reviewMode: 'base_skill',
+      subjectId: manifest.subject_id,
+    });
+
+    assert.deepStrictEqual(
+      runtime.copied.support_roles,
+      ['user-cat', 'inspector-cat', 'reviewer-cat'],
+    );
+    for (const roleName of runtime.copied.support_roles || []) {
+      assert.ok(fs.existsSync(path.join(runtime.roots.roles_root, roleName, 'role.json')));
+    }
+  });
+
   test('rejects role_skill when a same-name role-local Skill could impersonate the subject', () => {
     const manifest = manager.importLocalSkill({
       skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'identity-bound'), {
@@ -549,204 +526,6 @@ describe('ArenaManager', () => {
     assert.ok(!fs.existsSync(path.join(runtime.roots.skills_root, 'engineer-helper', 'SKILL.md')));
   });
 
-  test('marks mixed replay attempts as unstable rather than pass', () => {
-    const manifest = manager.importLocalSkill({
-      skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'flaky-helper'), {
-        name: 'flaky-helper',
-        description: 'Sometimes produces artifacts',
-      }),
-    });
-    const refs = writeEvidenceRefs(testRoot);
-
-    const run = manager.createRunIndex({
-      runId: 'flaky-run',
-      reviewMode: 'base_skill',
-      subjectId: manifest.subject_id,
-      usercatRunRef: {
-        run_id: 'usercat-flaky',
-        package_path: refs.usercatPackage,
-        trace_refs: [refs.nativeTrace],
-      },
-      traceRefs: [refs.nativeTrace],
-      inspectorRefs: [refs.inspectorCase],
-      reviewerRef: {
-        run_id: 'reviewer-flaky',
-        scorecard_path: refs.scorecard,
-        report_path: refs.report,
-      },
-      replayAttempts: {
-        planned: 3,
-        completed: 3,
-        pass_count: 2,
-        fail_count: 1,
-        blocked_count: 0,
-        trace_refs: [refs.replayTrace],
-      },
-      decision: 'unstable',
-    });
-
-    assert.strictEqual(run.decision, 'unstable');
-    assert.strictEqual(run.target_profile.active_role_id, 'base');
-  });
-
-  test('allows unstable when an original case is not reproduced by all passing replays', () => {
-    const manifest = manager.importLocalSkill({
-      skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'not-reproduced-helper'), {
-        name: 'not-reproduced-helper',
-        description: 'Original failure with passing replays',
-      }),
-    });
-    const refs = writeEvidenceRefs(testRoot);
-
-    const run = manager.createRunIndex({
-      runId: 'not-reproduced-run',
-      reviewMode: 'base_skill',
-      subjectId: manifest.subject_id,
-      usercatRunRef: {
-        run_id: 'usercat-not-reproduced',
-        package_path: refs.usercatPackage,
-        trace_refs: [refs.nativeTrace],
-      },
-      traceRefs: [refs.nativeTrace],
-      inspectorRefs: [refs.inspectorCase],
-      reviewerRef: {
-        run_id: 'reviewer-not-reproduced',
-        scorecard_path: refs.scorecard,
-        report_path: refs.report,
-      },
-      replayAttempts: {
-        planned: 3,
-        completed: 3,
-        pass_count: 3,
-        fail_count: 0,
-        blocked_count: 0,
-        trace_refs: [refs.replayTrace],
-      },
-      decision: 'unstable',
-    });
-
-    assert.strictEqual(run.decision, 'unstable');
-  });
-
-  test('rejects unstable without a completed passing replay', () => {
-    const manifest = manager.importLocalSkill({
-      skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'unsupported-unstable'), {
-        name: 'unsupported-unstable',
-        description: 'Unsupported unstable decision',
-      }),
-    });
-    const refs = writeEvidenceRefs(testRoot);
-
-    assert.throws(
-      () => manager.createRunIndex({
-        runId: 'unsupported-unstable-run',
-        reviewMode: 'base_skill',
-        subjectId: manifest.subject_id,
-        usercatRunRef: {
-          run_id: 'usercat-unsupported-unstable',
-          package_path: refs.usercatPackage,
-          trace_refs: [refs.nativeTrace],
-        },
-        traceRefs: [refs.nativeTrace],
-        inspectorRefs: [refs.inspectorCase],
-        reviewerRef: {
-          run_id: 'reviewer-unsupported-unstable',
-          scorecard_path: refs.scorecard,
-          report_path: refs.report,
-        },
-        replayAttempts: {
-          planned: 0,
-          completed: 0,
-          pass_count: 0,
-          fail_count: 0,
-          blocked_count: 0,
-          trace_refs: [],
-        },
-        decision: 'unstable',
-      }),
-      /at least one completed passing replay attempt/,
-    );
-  });
-
-  test('rejects pass with failed replay attempts', () => {
-    const manifest = manager.importLocalSkill({
-      skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'bad-pass'), {
-        name: 'bad-pass',
-        description: 'Bad pass',
-      }),
-    });
-    const refs = writeEvidenceRefs(testRoot);
-
-    assert.throws(
-      () => manager.createRunIndex({
-        runId: 'bad-pass',
-        reviewMode: 'base_skill',
-        subjectId: manifest.subject_id,
-        usercatRunRef: {
-          run_id: 'usercat-bad',
-          package_path: refs.usercatPackage,
-          trace_refs: [refs.nativeTrace],
-        },
-        traceRefs: [refs.nativeTrace],
-        inspectorRefs: [refs.inspectorCase],
-        reviewerRef: {
-          run_id: 'reviewer-bad',
-          scorecard_path: refs.scorecard,
-          report_path: refs.report,
-        },
-        replayAttempts: {
-          planned: 3,
-          completed: 3,
-          pass_count: 2,
-          fail_count: 1,
-          blocked_count: 0,
-          trace_refs: [refs.replayTrace],
-        },
-        decision: 'pass',
-      }),
-      /pass requires no failed or blocked replay attempts/,
-    );
-  });
-
-  test('allows pass without replay attempts when no cases require replay', () => {
-    const manifest = manager.importLocalSkill({
-      skillPath: writeSkill(path.join(testRoot, 'fixtures', 'skills', 'no-case-pass'), {
-        name: 'no-case-pass',
-        description: 'No case pass',
-      }),
-    });
-    const refs = writeEvidenceRefs(testRoot);
-
-    const run = manager.createRunIndex({
-      runId: 'no-case-pass',
-      reviewMode: 'base_skill',
-      subjectId: manifest.subject_id,
-      usercatRunRef: {
-        run_id: 'usercat-no-case',
-        package_path: refs.usercatPackage,
-        trace_refs: [refs.nativeTrace],
-      },
-      traceRefs: [refs.nativeTrace],
-      inspectorRefs: [refs.inspectorCase],
-      reviewerRef: {
-        run_id: 'reviewer-no-case',
-        scorecard_path: refs.scorecard,
-        report_path: refs.report,
-      },
-      replayAttempts: {
-        planned: 0,
-        completed: 0,
-        pass_count: 0,
-        fail_count: 0,
-        blocked_count: 0,
-        trace_refs: [],
-      },
-      decision: 'pass',
-    });
-
-    assert.strictEqual(run.decision, 'pass');
-    assert.strictEqual(run.replay_attempts.planned, 0);
-  });
 });
 
 function writeBaseSkills(root: string): void {
@@ -781,29 +560,6 @@ function writeRole(root: string, roleName: string, config: Record<string, unknow
   fs.mkdirSync(path.join(roleDir, 'prompts'), { recursive: true });
   fs.writeFileSync(path.join(roleDir, 'role.json'), JSON.stringify(config, null, 2), 'utf-8');
   fs.writeFileSync(path.join(roleDir, 'prompts', 'system.md'), 'Role prompt.', 'utf-8');
-}
-
-function writeEvidenceRefs(root: string): {
-  usercatPackage: string;
-  nativeTrace: string;
-  inspectorCase: string;
-  scorecard: string;
-  report: string;
-  replayTrace: string;
-} {
-  const usercatPackage = 'output/user-cat/candidates/usercat-real-run/manifest.json';
-  const nativeTrace = 'logs/sessions/pet/2026-06-29/session/traces.jsonl';
-  const inspectorCase = 'output/inspector/arena-case.json';
-  const scorecard = 'data/reviewer-runs/reviewer-pass/scorecard.json';
-  const report = 'data/reviewer-runs/reviewer-pass/report.md';
-  const replayTrace = 'output/replay/arena-pass/replay-results.json';
-  writeJson(path.join(root, usercatPackage), { run_id: 'usercat-real-run' });
-  writeText(path.join(root, nativeTrace), '{"entry_type":"trace","user":{"text":"do it"}}\n');
-  writeJson(path.join(root, inspectorCase), { issue_type: 'missing_artifact' });
-  writeJson(path.join(root, scorecard), { decision: 'pass' });
-  writeText(path.join(root, report), '# Reviewer Report\n');
-  writeJson(path.join(root, replayTrace), { attempts: 3 });
-  return { usercatPackage, nativeTrace, inspectorCase, scorecard, report, replayTrace };
 }
 
 function writeJson(filePath: string, value: unknown): void {

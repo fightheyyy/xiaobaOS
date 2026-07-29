@@ -45,7 +45,7 @@ RoleHub 发布规则：
 用户提供 role 名称（即 `$ARGUMENTS`），你需要：
 
 1. 检查 `roles/$ARGUMENTS/role.json` 是否存在；如果不存在，按 alias/normalized name 查找 `roles/<role-name>/role.json`
-2. 读取 `role.json`，提取 `name`、`displayName`、`description`、`promptFile`、`aliases`、`metadata.petId` 和 `status` 等信息。`blocked` 必须拒绝发布；`candidate` 必须先经过 Arena/人工验收并由独立 Promote 动作变为 `active`；旧资产未写 `status` 时按 `active` 兼容
+2. 读取 `role.json`，提取 `name`、`displayName`、`description`、`promptFile`、`aliases` 和 `metadata.petId` 等信息。只发布已经由共享 Test + Eval 控制 DAG 激活到生产目录的资产；隔离 Candidate 不可直接发布
 3. 检查 `promptFile` 指向的 prompt 是否存在，优先检查 `roles/<role-name>/prompts/<promptFile>`，再检查 `roles/<role-name>/<promptFile>`
 4. 如果缺少 category，询问用户选择：核心、工具、效率、科研、运维、其他
 5. 如果 `metadata.petId` 存在，检查本地是否有匹配桌宠资源，例如 `dashboard/pets/<petId>/pet.json`、`$XIAOBA_PETS_DIR/<petId>/pet.json` 或用户提供的 pet 目录

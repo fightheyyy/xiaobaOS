@@ -3,11 +3,10 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import { createRoleAwareToolManager } from '../bootstrap/tool-manager';
 import type { AgentServices } from '../core/agent-session';
 import { PetChannel } from '../pet/channel';
-import { SkillManager } from '../skills/skill-manager';
-import { AIService } from '../utils/ai-service';
+import { createReplayServices } from './replay-services';
+import { runWithArenaAuditScope } from '../utils/ai-service';
 import { Logger } from '../utils/logger';
 
 export interface TraceReplayRunOptions {
@@ -130,8 +129,13 @@ export async function runTraceReplay(options: TraceReplayRunOptions): Promise<Tr
   try {
     process.chdir(cwd);
     Logger.setSilentMode(true);
+    const services = options.services ?? await createDefaultReplayServices(
+      cwd,
+      requestedSessionKey,
+      runId,
+    );
     channel = new PetChannel({
-      services: options.services ?? createDefaultReplayServices(cwd),
+      services,
       sessionTtlMs: 10_000,
       ...(options.requiredActiveSkillName && {
         requiredActiveSkillName: options.requiredActiveSkillName,
@@ -142,14 +146,18 @@ export async function runTraceReplay(options: TraceReplayRunOptions): Promise<Tr
 
     const results: TraceReplayTurnResult[] = [];
     for (const input of inputs) {
-      results.push(await runReplayTurn({
-        baseUrl: listening.baseUrl,
-        petId,
-        sessionKey,
-        input,
-        source,
-        timeoutMs: options.timeoutMs ?? 180_000,
-      }));
+      results.push(await runWithArenaAuditScope(
+        services.aiService,
+        `${runId}:replay:${input.index}`,
+        () => runReplayTurn({
+          baseUrl: listening.baseUrl,
+          petId,
+          sessionKey,
+          input,
+          source,
+          timeoutMs: options.timeoutMs ?? 180_000,
+        }),
+      ));
     }
 
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -204,13 +212,23 @@ export function extractTraceReplayInputs(tracePath: string, maxTurns?: number): 
   return extractReplayInputs(readTraceJsonl(tracePath), maxTurns);
 }
 
-function createDefaultReplayServices(cwd: string): AgentServices {
-  const skillManager = new SkillManager();
-  return {
-    aiService: new AIService(),
-    toolManager: createRoleAwareToolManager(cwd),
-    skillManager,
-  };
+async function createDefaultReplayServices(
+  cwd: string,
+  sessionKey: string,
+  runId: string,
+): Promise<AgentServices> {
+  return createReplayServices({
+    working_directory: cwd,
+    parent_session_id: `trace-replay:${runId}`,
+    sandbox_mode: 'read_only',
+    role_name: inferReplayRole(sessionKey),
+  });
+}
+
+function inferReplayRole(sessionKey: string): string | undefined {
+  const match = sessionKey.match(/(?:^|:)role-([a-z0-9][a-z0-9-]{0,63})(?:$|:)/i);
+  const role = match?.[1]?.toLowerCase();
+  return role && role !== 'base' ? role : undefined;
 }
 
 function readTraceJsonl(tracePath: string): ParsedTraceLine[] {

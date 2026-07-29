@@ -245,8 +245,10 @@ describe('SkillManager runtime base skills', () => {
 
     const reviewerTools = createSubAgentToolExecutor(process.cwd(), 'test-reviewer', 'reviewer');
     const reviewerToolNames = reviewerTools.getToolDefinitions().map(tool => tool.name);
-    assert.ok(reviewerToolNames.includes('reviewer_eval_prepare'));
-    assert.ok(reviewerToolNames.includes('reviewer_xiaoba_cli_e2e'));
+    assert.strictEqual(reviewerToolNames.includes('reviewer_trace_replay'), false);
+    assert.strictEqual(reviewerToolNames.includes('reviewer_eval_prepare'), false);
+    assert.strictEqual(reviewerToolNames.includes('reviewer_xiaoba_cli_e2e'), false);
+    assert.strictEqual(reviewerToolNames.includes('reviewer_module_test'), false);
     assert.strictEqual(reviewerToolNames.includes('spawn_subagent'), false);
   });
 
@@ -274,7 +276,7 @@ describe('SkillManager runtime base skills', () => {
     const reviewerToolNames = reviewerTools.getToolDefinitions().map(tool => tool.name);
 
     assert.ok(reviewerToolNames.includes('skill'));
-    assert.ok(reviewerToolNames.includes('reviewer_eval_prepare'));
+    assert.strictEqual(reviewerToolNames.includes('reviewer_trace_replay'), false);
     for (const hiddenTool of ['spawn_subagent', 'check_subagent', 'send_text', 'send_file']) {
       assert.strictEqual(reviewerToolNames.includes(hiddenTool), false, `${hiddenTool} should stay hidden`);
     }

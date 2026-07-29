@@ -642,7 +642,6 @@ function writeTestSkill(root: string, name: string): void {
     '---',
     `name: ${name}`,
     `description: ${name} test skill`,
-    'status: candidate',
     '---',
     '',
     `Follow ${name} deterministically.`,

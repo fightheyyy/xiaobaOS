@@ -22,8 +22,18 @@ function collectTestFiles(dir) {
   });
 }
 
-const testFiles = collectTestFiles(testRoot);
+const nativeSandboxTestNames = new Set([
+  'source-candidate.test.ts',
+  'sub-agent-security.test.ts',
+]);
 const runnerArgs = process.argv.slice(2);
+const excludeNativeSandboxTests = runnerArgs.includes('--exclude-native-sandbox-tests');
+if (excludeNativeSandboxTests) {
+  runnerArgs.splice(runnerArgs.indexOf('--exclude-native-sandbox-tests'), 1);
+}
+const testFiles = collectTestFiles(testRoot).filter(file => (
+  !excludeNativeSandboxTests || !nativeSandboxTestNames.has(path.basename(file))
+));
 
 if (testFiles.length === 0) {
   console.error('No test files found under test/**/*.test.ts');

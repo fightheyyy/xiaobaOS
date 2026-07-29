@@ -1,0 +1,13 @@
+{
+  "benchmark_id": "base-runtime",
+  "name": "BaseRuntime Scripted Runtime Test",
+  "version": "0.4",
+  "description": "Implementation-level Scripted Runtime Test for the default no-role path. Prewritten model actions drive the real Pet/IM runtime to verify tool, delivery, artifact, safety, recovery, and evidence contracts.",
+  "source": "docs/evaluation/SPEC.md#target-architecture",
+  "case_jsonl": "runtime-benchmark.jsonl",
+  "decision_policy": {
+    "fail_on_any_case_failure": true,
+    "block_on_any_case_blocked": true,
+    "min_pass_rate": 1
+  }
+}

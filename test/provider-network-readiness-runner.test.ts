@@ -9,7 +9,7 @@ import type { ToolDefinition } from '../src/types/tool';
 import {
   runProviderNetworkReadiness,
   writeProviderNetworkReadinessReport,
-} from '../src/eval/provider-network-readiness-runner';
+} from '../src/testing/provider-network-readiness-runner';
 
 class FailingProviderService {
   async chatStream(_messages: Message[], _tools?: ToolDefinition[]): Promise<ChatResponse> {

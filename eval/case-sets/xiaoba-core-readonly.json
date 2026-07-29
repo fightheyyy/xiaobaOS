@@ -1,0 +1,82 @@
+{
+  "case_set_id": "xiaoba-core-readonly-v1",
+  "cases": [
+    {
+      "case_id": "base-repository-identity",
+      "task": "Read package.json and report the exact package name, version, and repository URL. Cite the file you inspected. Do not modify any file.",
+      "setup": {
+        "cwd": ".",
+        "session_key": "pet:xiaoba:role-base",
+        "sandbox": "read_only"
+      },
+      "budget": {
+        "max_turns": 4,
+        "max_latency_ms": 120000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "trace_exists",
+          "no_failed_tools",
+          "read_only_tools"
+        ],
+        "semantic_criteria": [
+          "The answer reports the package name and version exactly as found in package.json.",
+          "The answer reports the repository URL from package.json.",
+          "The answer identifies package.json as inspected evidence and does not claim a write."
+        ]
+      }
+    },
+    {
+      "case_id": "engineer-assurance-boundaries",
+      "task": "Read docs/SPEC.md and docs/evaluation/SPEC.md. Explain the difference between Test, Eval, Trace, Case, and Replay in this repository, then state which component owns semantic judgment. Do not modify any file.",
+      "setup": {
+        "cwd": ".",
+        "session_key": "pet:xiaoba:role-engineer-cat",
+        "sandbox": "read_only"
+      },
+      "budget": {
+        "max_turns": 6,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "trace_exists",
+          "no_failed_tools",
+          "read_only_tools"
+        ],
+        "semantic_criteria": [
+          "Test is described as implementation correctness and Eval as Agent behavioral capability.",
+          "Trace is runtime evidence, Case is executable input, and Replay executes a Case to produce a fresh Trace.",
+          "The answer identifies Verifier plus ReviewerCat under the Case Oracle as the judgment chain.",
+          "The answer is grounded in the two requested SPEC files and performs no write."
+        ]
+      }
+    },
+    {
+      "case_id": "reviewer-single-truth",
+      "task": "Read docs/SPEC.md and docs/evaluation/SPEC.md. Explain why Outcome is the Case-run truth and why EvaluationResult and Report must not create another verdict. Do not modify any file.",
+      "setup": {
+        "cwd": ".",
+        "session_key": "pet:xiaoba:role-reviewer-cat",
+        "sandbox": "read_only"
+      },
+      "budget": {
+        "max_turns": 5,
+        "max_latency_ms": 150000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "trace_exists",
+          "no_failed_tools",
+          "read_only_tools"
+        ],
+        "semantic_criteria": [
+          "The answer identifies one Outcome per Case execution as the authoritative decision.",
+          "EvaluationResult is described as fact aggregation rather than a second overall verdict.",
+          "Report is described as a view of the canonical result.",
+          "The answer cites the requested SPEC evidence and performs no write."
+        ]
+      }
+    }
+  ]
+}

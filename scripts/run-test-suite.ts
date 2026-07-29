@@ -1,7 +1,10 @@
 #!/usr/bin/env tsx
 
 import * as path from 'path';
-import { runEvalSuite, writeEvalScorecard } from '../src/eval';
+import {
+  runScriptedRuntimeTestSuite,
+  writeScriptedRuntimeTestResult,
+} from '../src/testing';
 
 interface CliOptions {
   suitePath: string;
@@ -12,14 +15,14 @@ interface CliOptions {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
-  const scorecard = writeEvalScorecard(await runEvalSuite({
+  const scorecard = writeScriptedRuntimeTestResult(await runScriptedRuntimeTestSuite({
     suitePath: options.suitePath,
     outDir: options.outDir,
     caseIds: options.caseIds,
   }));
 
   console.log([
-    `Test suite complete: ${scorecard.summary.decision}`,
+    `Scripted Runtime Test complete: ${scorecard.summary.decision}`,
     `suite=${scorecard.suite_id}`,
     `cases=${scorecard.summary.cases_passed}/${scorecard.summary.cases_total} passed`,
     `hardFailures=${scorecard.summary.hard_failures}`,
@@ -78,7 +81,8 @@ function printHelp(): void {
   console.log([
     'Usage: tsx scripts/run-test-suite.ts -- [--suite <path>] [--case <id>] [--out <dir>] [--allow-fail]',
     '',
-    'Runs a deterministic XiaoBa test suite and writes manifest.json, scorecard.json, and report.md.',
+    'Runs prewritten model actions against the real XiaoBa Runtime.',
+    'This is implementation correctness evidence, not Agent behavioral Eval.',
     '',
     'Default suite: test/contract-smoke/suites/contract-sentinel.json',
   ].join('\n'));

@@ -3,19 +3,14 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { Command, Option } from 'commander';
 import {
-  EvolutionPromotionResult,
-  PromoteEvolutionCandidateOptions,
-  promoteEvolutionCandidate,
-} from '../arena/evolution-promotion';
-import {
   buildEvolutionDigest,
   normalizeEvolutionDate,
 } from '../roles/evolution-cat/evolution-observer';
 import {
-  EvolutionDagManifest,
-  EvolutionDagOptions,
-  runEvolutionDag,
-} from '../roles/evolution-cat/evolution-dag';
+  EvolutionSleepExecution,
+  EvolutionSleepRunOptions,
+  runEvolutionSleep,
+} from '../roles/evolution-cat/evolution-runtime';
 import { EvolutionSleepSchedule } from '../roles/evolution-cat/evolution-scheduler';
 
 const STALE_LOCK_MS = 12 * 60 * 60 * 1000;
@@ -23,30 +18,24 @@ const DEFAULT_WORKER_TIMEOUT_MS = 45 * 60 * 1000;
 const WORKER_KILL_GRACE_MS = 5 * 1000;
 
 export interface EvolutionCommandDependencies {
-  runDag?: (options: EvolutionDagOptions) => Promise<EvolutionDagManifest>;
+  runWorkflow?: (options: EvolutionSleepRunOptions) => Promise<EvolutionSleepExecution>;
   runWorker?: (request: EvolutionSleepWorkerRequest) => Promise<void>;
-  promoteCandidate?: (
-    options: PromoteEvolutionCandidateOptions,
-  ) => EvolutionPromotionResult | Promise<EvolutionPromotionResult>;
 }
 
 interface EvolutionSleepOptions {
   date?: string;
   minOccurrences?: string;
+  runs?: string;
   harvestOnly?: boolean;
   verbose?: boolean;
   worker?: boolean;
-}
-
-interface EvolutionPromoteOptions {
-  date: string;
-  confirm: string;
 }
 
 export interface EvolutionSleepWorkerRequest {
   workingDirectory: string;
   targetDate: string;
   minOccurrences: number;
+  runsPerCase: number;
   verbose: boolean;
   timeoutMs?: number;
 }
@@ -66,19 +55,21 @@ export function registerEvolutionCommand(
 ): void {
   const evolution = program
     .command('evolution')
-    .description('Inspector-first scheduled self-evolution DAG');
+    .description('Lightweight Trace -> Candidate -> shared Test + Eval evolution');
 
   evolution
     .command('sleep')
-    .description('Run one Inspector-first evolution DAG cycle without entering Base')
+    .description('Run one lightweight Evolution cycle without entering Base')
     .option('--date <date>', 'local calendar date to harvest (YYYY-MM-DD); default yesterday')
     .option('--min-occurrences <n>', 'minimum repeated observations required for a pattern', '2')
+    .option('--runs <n>', 'shared Eval Replay runs per generated Case', '3')
     .option('--harvest-only', 'only build the deterministic digest; do not call the model')
     .option('--verbose', 'show runtime logs')
     .addOption(new Option('--worker').hideHelp())
     .action(async (options: EvolutionSleepOptions) => {
       const targetDate = normalizeEvolutionDate(options.date);
       const minOccurrences = parseMinOccurrences(options.minOccurrences);
+      const runsPerCase = parsePositiveInteger(options.runs || '3', 'runs');
       if (options.harvestOnly) {
         const result = buildEvolutionDigest({
           workingDirectory: process.cwd(),
@@ -96,54 +87,44 @@ export function registerEvolutionCommand(
         return;
       }
 
-      if (!options.worker && !dependencies.runDag) {
+      if (!options.worker && !dependencies.runWorkflow) {
         const runWorker = dependencies.runWorker || runEvolutionSleepWorker;
         await runWorker({
           workingDirectory: process.cwd(),
           targetDate,
           minOccurrences,
+          runsPerCase,
           verbose: options.verbose === true,
         });
         return;
       }
 
       await withEvolutionSleepLock(process.cwd(), async () => {
-        const runDag = dependencies.runDag || runEvolutionDag;
-        const result = await runDag({
+        const runWorkflow = dependencies.runWorkflow || runEvolutionSleep;
+        const execution = await runWorkflow({
           workingDirectory: process.cwd(),
           targetDate,
           minOccurrences,
+          runsPerCase,
           verbose: options.verbose === true,
         });
+        const attempts = execution.result.attempts;
+        const activated = attempts.filter(attempt => attempt.activated).length;
+        const ok = activated === attempts.length;
         printJson({
-          ok: result.status === 'completed',
-          mode: 'evolution_dag',
-          run_id: result.run_id,
-          status: result.status,
-          route: result.route,
-          terminal: result.terminal,
-          manifest_path: result.manifest_ref,
+          ok,
+          mode: 'evolution',
+          run_id: execution.result.evolution_run_id,
+          status: attempts.length === 0 ? 'no_op' : ok ? 'completed' : 'blocked',
+          attempts: attempts.length,
+          activated,
+          result_path: displayPath(execution.result_path),
+          digest_path: displayPath(execution.digest_path),
         });
-        if (options.worker && result.status !== 'completed') {
+        if (options.worker && !ok) {
           process.exitCode = 1;
         }
       });
-    });
-
-  evolution
-    .command('promote')
-    .description('Explicitly promote the immutable Arena-passed Candidate from one evolution DAG')
-    .requiredOption('--date <date>', 'canonical evolution DAG date (YYYY-MM-DD)')
-    .requiredOption('--confirm <name>', 'exact Candidate name being promoted')
-    .action(async (options: EvolutionPromoteOptions) => {
-      const targetDate = normalizeEvolutionDate(options.date);
-      const promote = dependencies.promoteCandidate || promoteEvolutionCandidate;
-      const result = await promote({
-        workingDirectory: process.cwd(),
-        targetDate,
-        confirmName: options.confirm,
-      });
-      printJson({ ok: true, mode: 'evolution_promotion', ...result });
     });
 
   const schedule = evolution
@@ -189,6 +170,8 @@ export async function runEvolutionSleepWorker(request: EvolutionSleepWorkerReque
     request.targetDate,
     '--min-occurrences',
     String(request.minOccurrences),
+    '--runs',
+    String(request.runsPerCase),
     ...(request.verbose ? ['--verbose'] : []),
   ];
   await runSupervisedProcess({
@@ -293,6 +276,12 @@ function parseMinOccurrences(value: string | undefined): number {
   if (parsed < 2 || parsed > 20) {
     throw new Error('min-occurrences 必须是 2 到 20 的整数。');
   }
+  return parsed;
+}
+
+function parsePositiveInteger(value: string, name: string): number {
+  const parsed = parseInteger(value, name);
+  if (parsed <= 0) throw new Error(`${name} 必须是正整数。`);
   return parsed;
 }
 
