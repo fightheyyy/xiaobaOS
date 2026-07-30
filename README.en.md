@@ -9,14 +9,14 @@
 
   <em>Works like a teammate. Evolves like reviewed software.</em>
 
-  [![Release](https://img.shields.io/github/v/release/fightheyyy/XiaoBa-CLI?include_prereleases&label=release)](https://github.com/fightheyyy/XiaoBa-CLI/releases)
-  [![Desktop](https://img.shields.io/badge/desktop-macOS%20Apple%20Silicon-yellow.svg)](https://github.com/fightheyyy/XiaoBa-CLI/releases/tag/v0.2.0)
+  [![Release](https://img.shields.io/github/v/release/fightheyyy/xiaobaOS?include_prereleases&label=release)](https://github.com/fightheyyy/xiaobaOS/releases)
+  [![Desktop](https://img.shields.io/badge/desktop-macOS%20Apple%20Silicon-yellow.svg)](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1)
   [![Node](https://img.shields.io/badge/CLI-Node.js%20%3E%3D18.19-green.svg)](package.json)
   [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-  [Quick Start from Source](#quick-start) · [macOS v0.2.0 Preview](https://github.com/fightheyyy/XiaoBa-CLI/releases/tag/v0.2.0) · [How It Works](#work-and-evolution) · [Governed Evolution](#governed-evolution) · [简体中文](README.md)
+  [Quick Start from Source](#quick-start) · [macOS v0.2.1 Preview](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1) · [How It Works](#work-and-evolution) · [Governed Evolution](#governed-evolution) · [简体中文](README.md)
 
-  <sub>The v0.2.0 Preview includes the current eight-Role and governed-evolution path on Apple Silicon (arm64). It is ad-hoc signed, not Apple-notarized, and desktop child services still require system Node.js 18.19+.</sub>
+  <sub>The v0.2.1 Preview includes the current eight-Role and lightweight Assurance & Evolution path on Apple Silicon (arm64). It is ad-hoc signed, not Apple-notarized, and desktop child services still require system Node.js 18.19+.</sub>
 </div>
 
 ---
@@ -104,13 +104,13 @@ Runtime state, traces, and artifact evidence stay local by default. Models can b
 
 ## Quick Start
 
-> **macOS Desktop Preview**: [XiaoBa v0.2.0](https://github.com/fightheyyy/XiaoBa-CLI/releases/tag/v0.2.0) targets Apple Silicon (arm64) and includes the current eight-Role and governed-evolution path. It is ad-hoc signed, not notarized, and the CLI / Pet / IM child services started by the desktop app require system Node.js 18.19+.
+> **macOS Desktop Preview**: [XiaoBa v0.2.1](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1) targets Apple Silicon (arm64) and includes the current eight-Role and lightweight Assurance & Evolution path. It is ad-hoc signed, not notarized, and the CLI / Pet / IM child services started by the desktop app require system Node.js 18.19+.
 
 Node.js 18.19 or newer is required to run from source:
 
 ```bash
-git clone https://github.com/fightheyyy/XiaoBa-CLI.git
-cd XiaoBa-CLI
+git clone https://github.com/fightheyyy/xiaobaOS.git
+cd xiaobaOS
 npm install
 cp .env.example .env
 ```

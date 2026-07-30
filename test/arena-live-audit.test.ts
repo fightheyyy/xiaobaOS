@@ -12,12 +12,14 @@ import {
   resetArenaLiveAuditForTests,
   runArenaAuditedProviderCall,
 } from '../src/arena/live-audit';
+import { APP_VERSION } from '../src/version';
 
 afterEach(() => resetArenaLiveAuditForTests());
 
 test('Arena live contract is credential-free and declares enforced composite call bounds', () => {
   const contract = arenaLiveRuntimeContract();
   assert.strictEqual(contract.schema, 'barena.xiaoba_live_runtime_contract.v1');
+  assert.strictEqual(contract.xiaoba_version, APP_VERSION);
   assert.deepStrictEqual(contract.bounds, ARENA_LIVE_CALL_BOUNDS);
   assert.strictEqual(contract.enforcement.sdk_max_retries, 0);
   assert.strictEqual(contract.enforcement.authoritative_per_call_telemetry, true);

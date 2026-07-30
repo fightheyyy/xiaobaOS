@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Message, ChatConfig, ChatResponse } from '../types';
 import { ToolDefinition } from '../types/tool';
+import { APP_VERSION } from '../version';
 
 export type ArenaProviderCallComponent = 'target' | 'usercat' | 'inspector' | 'reviewer' | 'replay';
 
@@ -15,7 +16,7 @@ export const ARENA_LIVE_CALL_BOUNDS = Object.freeze({
 
 export interface ArenaLiveRuntimeContract {
   schema: 'barena.xiaoba_live_runtime_contract.v1';
-  xiaoba_version: '0.2.0';
+  xiaoba_version: string;
   composite_call_contract: 'barena.xiaoba_composite_calls.v1';
   provider_call_record_schema: 'barena.provider_call.v1';
   bounds: typeof ARENA_LIVE_CALL_BOUNDS;
@@ -65,7 +66,7 @@ let state: ArenaLiveAuditState | undefined;
 export function arenaLiveRuntimeContract(): ArenaLiveRuntimeContract {
   return {
     schema: 'barena.xiaoba_live_runtime_contract.v1',
-    xiaoba_version: '0.2.0',
+    xiaoba_version: APP_VERSION,
     composite_call_contract: 'barena.xiaoba_composite_calls.v1',
     provider_call_record_schema: 'barena.provider_call.v1',
     bounds: ARENA_LIVE_CALL_BOUNDS,

@@ -10,13 +10,13 @@
   <em>像同事一样完成工作，像软件一样验收进化。</em>
 
   [![Release](https://img.shields.io/github/v/release/fightheyyy/xiaobaOS?include_prereleases&label=release)](https://github.com/fightheyyy/xiaobaOS/releases)
-  [![Desktop](https://img.shields.io/badge/desktop-macOS%20Apple%20Silicon-yellow.svg)](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.0)
+  [![Desktop](https://img.shields.io/badge/desktop-macOS%20Apple%20Silicon-yellow.svg)](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1)
   [![Node](https://img.shields.io/badge/CLI-Node.js%20%3E%3D18.19-green.svg)](package.json)
   [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-  [源码快速开始](#快速开始) · [macOS v0.2.0 Preview](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.0) · [工作方式](#工作与进化) · [受控进化](#受控进化) · [English](README.en.md)
+  [源码快速开始](#快速开始) · [macOS v0.2.1 Preview](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1) · [工作方式](#工作与进化) · [受控进化](#受控进化) · [English](README.en.md)
 
-  <sub>v0.2.0 Preview 包含当前八角色与受控进化主线，面向 Apple Silicon（arm64）。该包采用 ad-hoc 签名、尚未完成 Apple notarization，桌面子服务仍需要系统 Node.js 18.19+。</sub>
+  <sub>v0.2.1 Preview 包含当前八角色与轻量 Assurance & Evolution 主线，面向 Apple Silicon（arm64）。该包采用 ad-hoc 签名、尚未完成 Apple notarization，桌面子服务仍需要系统 Node.js 18.19+。</sub>
 </div>
 
 ---
@@ -104,7 +104,7 @@ flowchart LR
 
 ## 快速开始
 
-> **macOS Desktop Preview**：可下载 [XiaoBa v0.2.0](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.0)。该 DMG 面向 Apple Silicon（arm64），包含当前八角色与受控进化主线；它采用 ad-hoc 签名、尚未 notarize，桌面启动的 CLI / Pet / IM 子服务需要系统 Node.js 18.19+。
+> **macOS Desktop Preview**：可下载 [XiaoBa v0.2.1](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1)。该 DMG 面向 Apple Silicon（arm64），包含当前八角色与轻量 Assurance & Evolution 主线；它采用 ad-hoc 签名、尚未 notarize，桌面启动的 CLI / Pet / IM 子服务需要系统 Node.js 18.19+。
 
 源码运行需要 Node.js 18.19 或更高版本：
 
