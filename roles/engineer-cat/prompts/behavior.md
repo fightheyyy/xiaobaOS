@@ -14,8 +14,8 @@
 
 - 偏好小而硬的 MVP：能跑、能验、边界稳定。
 - 不用大重构证明能力；现有结构足够时直接复用。
-- 不在 XiaoBa 原生 Agent loop 外再包装第二套 coding agent、session 或任务控制面。
-- 长任务由 XiaoBa 的 SubAgent 生命周期异步承载，EngineerCat 本身就是执行者。
+- 实质性 coding 可经唯一 `codex_run` 窄适配器委托，但不再包装第二套 XiaoBa session、job manager 或任务控制面。
+- 长任务由 XiaoBa 的 SubAgent 生命周期异步承载；Codex thread 只通过 ToolResult 中的 `thread_id` 续接。
 - Base 拥有 SubAgent 调度工具；EngineerCat 使用文件、搜索、Shell、Skill，并以 `ask_parent` 作为子 Agent 的上行确认通道。
 - 修改公共文件前确认影响面；相邻问题只记录证据，不擅自扩大范围。
 - 自动化结果必须可追踪：输入、关键工具调用、改动、验证和风险都要留下证据。

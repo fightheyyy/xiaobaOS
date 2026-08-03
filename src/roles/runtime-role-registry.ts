@@ -66,6 +66,7 @@ import { UserTraceRunTool } from './user-cat/tools/user-trace-run-tool';
 import { createBrowserCatTools } from './browser-cat';
 import { createGuiCatTools } from './gui-cat';
 import { EvolutionRememberTool } from './evolution-cat/tools/remember-tool';
+import { createEngineerCatTools } from './engineer-cat';
 
 export interface RoleRuntimeSupport {
   stop(): Promise<void>;
@@ -94,6 +95,10 @@ export function getRoleSpecificToolsForResolvedRole(roleName?: string): Tool[] {
 }
 
 function getRoleSpecificToolsForNormalizedRole(normalizedRole: string): Tool[] {
+  if (normalizedRole === 'engineer-cat') {
+    return createEngineerCatTools();
+  }
+
   if (normalizedRole === 'evolution-cat') {
     return [new EvolutionRememberTool()];
   }

@@ -1,7 +1,7 @@
 # XiaoBa-CLI PLAN
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-08-03
 Owner：XiaoBa maintainers
 
 本文只维护仓库级当前状态和收敛顺序。模块细节进入六份模块 PLAN。
@@ -12,7 +12,7 @@ XiaoBa-CLI 已形成共享 Agent Runtime、一个 Base Main Agent 和八个默�
 
 - EngineerCat、BrowserCat、GuiCat、SecretaryCat 负责执行接管。
 - UserCat、InspectorCat、ReviewerCat、EvolutionCat 负责共享 Assurance & Evolution。
-- 所有角色复用 AgentSession / ConversationRunner / ToolManager；driver 不是第二个 Agent loop。
+- 所有角色复用 AgentSession / ConversationRunner / ToolManager；Browser/GUI/Feishu driver 不是第二个 Agent loop。EngineerCat 是显式例外，只能经单一 `codex_run` Tool 调用外部 Codex executor，不保存第二套 job/session 状态。
 - CLI、Feishu、Weixin、Pet、Dashboard 和 Electron 共用 Runtime 主链。
 - 本地 Trace、artifact、delivery evidence 和可选 OTLP projection 已有稳定边界。
 - Test / Eval / Trace / Case / Replay 的概念已收敛。
@@ -24,6 +24,7 @@ XiaoBa-CLI 已形成共享 Agent Runtime、一个 Base Main Agent 和八个默�
 - 首个维护中的 `xiaoba-core-readonly-v1` CaseSet 已加入；三条真实 Agent Case 覆盖 Base、EngineerCat 与 ReviewerCat。
 - Case Replay 默认只暴露只读工具；需要写入的 Case 必须显式声明 `workspace_write`，并且只能在 enforced clean runtime 中执行。
 - source-code Finding 已通过一次性 `delegate_code` 交给隔离 EngineerCat Source Candidate；候选副本通过完整 Test + shared Eval 后才事务性替换 source + dist，并只影响下一进程。
+- EngineerCat 已接入官方 `@openai/codex-sdk` 窄适配器；只暴露 task/access/thread resume，原生 coding tools 保留为小修改和失败降级。
 - BaseRuntime 预写响应的入口、实现和默认产物已迁到 Scripted Runtime Test 边界。
 - UserCat、InspectorCat、ReviewerCat、EvolutionCat runtime assets 已瘦身；dead Inspector 服务、冗余 Reviewer Tools 和实验 Arena scorers 已删除。
 - 旧 Arena scorecard worker、typed Evolution DAG、manual promotion、patch regression 和专用 Reviewer replay Tool 已删除。
@@ -59,13 +60,15 @@ flowchart LR
 | M9 Default workflow migration | Completed | Arena clean-runtime CLI 与 nightly Evolution 已切到共享核心 |
 | M10 Legacy state removal | Completed | 旧 runner/DAG/promotion/regression 与 Dashboard/loader capability lifecycle 均已删除 |
 | M11 Browser/GUI/Secretary readiness | Partial | typed adapters 可用，外部依赖与授权仍不完整 |
+| M12 EngineerCat Codex adapter | Completed | 官方 SDK 收敛为一个 role-scoped Tool，保留原生 coding fallback，不恢复 job manager/supervisor |
 
 ## Next Steps
 
 1. 用真实失败和回归逐步扩充 `xiaoba-core-readonly-v1`；只按实际 Case 需要增加 hard Verifier。
 2. 在有真实平台需求时补非 macOS 的 enforced `workspace_write` adapter；无沙箱的平台继续 fail closed。
 3. 内部 `Eval*` 兼容名只随相关维护逐步收敛。
-4. 不增加新的 schema、report、role 或 workflow subsystem。
+4. 在 Windows / Linux Electron 发行构建中验证 SDK 的 optional native binary；macOS arm64 已完成打包态验证。
+5. 不增加新的 schema、report、role 或 workflow subsystem。
 
 ## Owners
 
@@ -100,7 +103,10 @@ flowchart LR
 ## Recent Verification
 
 - `npm run build` passed。
-- 清理后 `npm test` passed 556/556 across 100 suites。
+- `npm test` passed 561/561 across 102 suites。
+- EngineerCat 相关 focused tests passed 31/31 across 5 suites；真实官方 SDK read-only start/resume smoke 返回固定标记，两轮均为 zero changes / zero external tools。
+- EngineerCat production-path E2E passed：真实 `AgentSession → ConversationRunner → ToolManager → codex_run → official SDK` 连续完成 start + 指定 `thread_id` resume，保持同一 thread，zero changes / commands / external tools / errors。
+- macOS arm64 Electron directory build passed；从 `/tmp` 加载 `XiaoBa.app` 内 adapter 并续接同一 thread 的 packaged smoke 返回固定标记，zero changes / commands / external tools / errors，且包内没有旧 Engineer supervisor 编译残留或重复 Codex native binary。
 - Scripted Runtime Test focused tests passed 45/45。
 - BaseRuntime Scripted Runtime Test passed 11/11。
 - Contract smoke passed 23/23。

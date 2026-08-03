@@ -1,7 +1,7 @@
 # Roles & Skills SPEC
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-08-03
 适用范围：Base、八个默认 Role、Role-local Skills、共享 review roles 和 Evolution。
 
 本文是 XiaoBa-CLI `Roles & Skills` 模块的唯一架构真相源。
@@ -32,7 +32,7 @@ In scope:
 
 Out of scope:
 
-- 第二套 Chat/Agent/MCP loop。
+- XiaoBa 自建或复制第二套 Chat/Agent/MCP loop；EngineerCat 可以通过窄 Tool adapter 委托给已安装的外部 Codex executor。
 - RouterCat、Recovery Role 或通用任务框架。
 - 每个 Role 独立的 architecture docs。
 - Evolution 自有 Replay、Judge、Scorecard、Regression 或 promotion system。
@@ -49,6 +49,7 @@ Out of scope:
 - ReviewerCat 是共享只读 Judge；四个专用评测 Tool 均已删除。
 - EvolutionCat 的 prompt 与 `self-evolution` Skill 已收敛到 Candidate 生成；`evolution sleep` 已进入轻量 control workflow。
 - 当前自动 Candidate adapter 支持 Role/Skill 与 code：Role/Skill 由 EvolutionCat 生成；code 通过一次性 `delegate_code` 路由到隔离源码副本中的 EngineerCat。
+- EngineerCat 现在拥有一个 role-scoped `codex_run`：官方 SDK 负责 Codex thread start/resume，XiaoBa 只负责固定工作区、只读/可写模式、中止和结构化证据。原生 coding tools 保留为小修改和降级路径；Source Candidate builder 显式隐藏该 Tool。
 
 旧 nightly typed DAG、manual promote CLI 与 capability lifecycle 已删除。发行目录里的 Role/Skill package 都可被 Runtime 发现；Candidate 只存在于 Evolution run 的隔离目录，旧 package 内的 `status` 字段不再参与解析。
 
@@ -58,6 +59,8 @@ flowchart LR
     Base --> Improve["User / Inspector / Reviewer / Evolution"]
     Execute --> Runtime["one XiaoBa Agent loop"]
     Improve --> Runtime
+    Execute -. "EngineerCat only" .-> CodexAdapter["codex_run"]
+    CodexAdapter --> Codex["local Codex thread"]
 
     Trace["Trace"] --> Inspector["InspectorCat"]
     Inspector --> Pair["Finding + Case"]
@@ -75,6 +78,8 @@ flowchart LR
     Input -->|Case| Pair
     Pair --> Owner{"change owner"}
     Owner -->|code| Engineer["EngineerCat"]
+    Engineer --> CodexAdapter["optional codex_run"]
+    CodexAdapter --> Codex["local Codex thread"]
     Owner -->|role / skill / memory| Evolution["EvolutionCat"]
     Engineer --> Candidate["Candidate artifact"]
     Evolution --> Candidate
@@ -89,7 +94,7 @@ flowchart LR
 ### User-facing and execution roles
 
 - Base Main Agent：唯一用户界面与 dispatcher。
-- EngineerCat：代码实现和修复。
+- EngineerCat：代码实现和修复；原生 coding tools 处理小修改和降级，实质性任务可委托给 role-scoped `codex_run`。
 - BrowserCat：浏览器接管。
 - GuiCat：本地桌面 GUI 接管。
 - SecretaryCat：飞书工作流；`FeishuCat` 只是 alias。

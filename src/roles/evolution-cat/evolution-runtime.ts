@@ -46,6 +46,7 @@ const CANDIDATE_BUILDER_HIDDEN_TOOLS = [
 ];
 
 const ENGINEER_CANDIDATE_HIDDEN_TOOLS = [
+  'codex_run',
   'spawn_subagent',
   'check_subagent',
   'stop_subagent',

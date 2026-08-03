@@ -225,6 +225,7 @@ describe('SkillManager runtime base skills', () => {
     }
     assert.strictEqual(engineerToolNames.includes('engineer_task_run'), false);
     assert.strictEqual(engineerToolNames.includes('codex_job_status'), false);
+    assert.ok(engineerToolNames.includes('codex_run'));
     assert.ok(engineerToolNames.includes('ask_parent'));
     for (const hiddenTool of [
       'spawn_subagent',
@@ -262,6 +263,7 @@ describe('SkillManager runtime base skills', () => {
     const engineerToolNames = engineerTools.getToolDefinitions().map(tool => tool.name);
     assert.ok(engineerToolNames.includes('skill'));
     assert.ok(engineerToolNames.includes('execute_shell'));
+    assert.ok(engineerToolNames.includes('codex_run'));
     assert.ok(engineerToolNames.includes('ask_parent'));
     for (const hiddenTool of ['spawn_subagent', 'check_subagent', 'stop_subagent', 'resume_subagent']) {
       assert.strictEqual(engineerToolNames.includes(hiddenTool), false, `${hiddenTool} should stay Base-only`);

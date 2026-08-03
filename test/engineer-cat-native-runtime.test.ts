@@ -54,7 +54,7 @@ describe('EngineerCat native XiaoBa runtime contract', () => {
 
     const manager = createRoleAwareToolManager(process.cwd(), {}, 'engineer-cat');
     const visibleToolNames = manager.getToolDefinitions().map(tool => tool.name);
-    for (const toolName of ['read_file', 'write_file', 'edit_file', 'glob', 'grep', 'execute_shell']) {
+    for (const toolName of ['read_file', 'write_file', 'edit_file', 'glob', 'grep', 'execute_shell', 'codex_run']) {
       assert.ok(visibleToolNames.includes(toolName), `${toolName} should be visible to EngineerCat`);
     }
     assert.ok(visibleToolNames.includes('skill'));
@@ -105,7 +105,7 @@ describe('EngineerCat native XiaoBa runtime contract', () => {
     assert.strictEqual(manager.getSkill('engineer-task-runner'), undefined);
   });
 
-  test('runtime assets describe one XiaoBa Agent loop', () => {
+  test('runtime assets describe one XiaoBa loop with one narrow Codex adapter', () => {
     const roleConfig = JSON.parse(fs.readFileSync('roles/engineer-cat/role.json', 'utf-8')) as {
       description: string;
       aliases: string[];
@@ -120,14 +120,16 @@ describe('EngineerCat native XiaoBa runtime contract', () => {
       'read_file', 'write_file', 'edit_file', 'glob', 'grep', 'execute_shell', 'skill', 'ask_parent',
     ]);
     assert.deepStrictEqual(roleConfig.aliases, ['engineer', 'coder']);
-    assert.match(roleConfig.description, /共享 Agent loop 和受限 coding 工具/);
+    assert.match(roleConfig.description, /共享 Agent loop/);
+    assert.match(roleConfig.description, /codex_run/);
     assert.match(prompt, /同一套 XiaoBa Agent loop/);
-    assert.match(prompt, /直接使用角色允许的 coding 工具/);
+    assert.match(prompt, /优先通过单一 `codex_run` Tool/);
+    assert.match(prompt, /`access=workspace_write`/);
     assert.match(prompt, /用 `ask_parent` 向父会话请求输入/);
     assert.match(prompt, /属于父 Agent 调度控制面/);
-    assert.match(behavior, /EngineerCat 本身就是执行者/);
+    assert.match(behavior, /唯一 `codex_run` 窄适配器/);
     for (const content of [roleConfig.description, prompt, behavior]) {
-      assert.doesNotMatch(content, /Codex|codex_job_|engineer_task_|engineer_codex_/i);
+      assert.doesNotMatch(content, /codex_job_|engineer_task_|engineer_codex_/i);
     }
   });
 });

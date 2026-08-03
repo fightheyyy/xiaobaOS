@@ -12,7 +12,7 @@ XiaoBa 只有一个面向用户的 Base Main Agent。Role 是 Base 派遣的专�
 
 | Role | 责任 | 不负责 |
 | --- | --- | --- |
-| `engineer-cat` | 代码与工程环境接管、实现返工 | 浏览器/桌面专属操作 |
+| `engineer-cat` | 代码与工程环境接管；实质性编码可经窄适配器委托 Codex | 浏览器/桌面专属操作、Codex job 调度系统 |
 | `browser-cat` | 浏览器接管和页面证据验证 | 桌面 GUI、任意 Shell |
 | `gui-cat` | macOS 桌面 GUI 接管和操作证据 | 浏览器专属流程、任意 Shell |
 | `secretary-cat` | 飞书日历、消息、邮件、任务、文档和协同工作流；可用 `feishu-cat` / `FeishuCat` 别名 | 重写飞书 API/CLI、绕过确认直接执行后果动作 |
@@ -53,6 +53,8 @@ xiaoba evolution schedule install  # macOS only
 内置自动 schedule 当前仅支持 macOS 的每日 cron；其他平台可显式运行 `xiaoba evolution sleep`。
 
 SecretaryCat 复用[官方 larksuite/cli](https://github.com/larksuite/cli)执行飞书能力。XiaoBa 只在它上面增加角色派遣、领域工具收窄、后果动作确认、交付和 evidence；使用前需在本机安装并配置官方 `lark-cli`。
+
+EngineerCat 的 `codex_run` 复用官方 [`@openai/codex-sdk`](https://www.npmjs.com/package/@openai/codex-sdk)。依赖中已包含当前平台 Codex 可执行文件；首次使用前运行 `codex login`，或配置 `CODEX_API_KEY`。需要使用另一个固定可执行文件时，由运维环境设置 `XIAOBA_CODEX_EXE`；该路径不会暴露给模型参数。Codex 默认禁用 web/network 与已配置 MCP server，并在当前工作区的只读或可写沙箱中执行。
 
 Base 派遣跨角色工作时使用 `role_name`，目标角色自行选择其可见 Skill。`base`、`default`、`none` 表示不激活角色。
 

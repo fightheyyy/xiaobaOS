@@ -1,7 +1,7 @@
 {
   "name": "engineer-cat",
   "displayName": "PochiBa",
-  "description": "XiaoBa 原生工程角色，使用共享 Agent loop 和受限 coding 工具完成代码理解、实现、修复与验证。",
+  "description": "XiaoBa 工程角色，使用共享 Agent loop，可经窄 codex_run 适配器委托实质性编码，并保留原生 coding 工具降级。",
   "promptFile": "engineer-system-prompt.md",
   "aliases": [
     "engineer",

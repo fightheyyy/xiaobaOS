@@ -1,7 +1,7 @@
 # Roles & Skills PLAN
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-08-03
 Owner：Policy maintainers
 
 ## Current Status
@@ -17,6 +17,7 @@ Owner：Policy maintainers
 - EvolutionCat 的运行时资产和 control workflow 已瘦身，`evolution sleep` 已切为默认入口。
 - Role/Skill Candidate 已接入 shared Test、shared Eval 与原子 next-Session activation。
 - code Finding 已接入显式 EngineerCat Source Candidate adapter；候选在隔离源码副本中完成完整 Test + Eval，再事务性激活 source + dist 并于下一进程生效。
+- EngineerCat 已接入唯一 `codex_run` Tool，复用官方 SDK 的 start/resume，并保留原生 coding fallback；未恢复 job manager/supervisor。
 - 旧 nightly typed DAG、patch workspace/regression、manual promote CLI 与专用 Reviewer replay Tool 已删除。
 - runtime Candidate lifecycle、Dashboard Promote/Unblock API/UI 与 `CapabilityStatus` 类型已删除。
 - 发行目录中的 Role/Skill 一律作为已安装 package 加载；旧 `status` 元数据被忽略。
@@ -40,6 +41,7 @@ flowchart LR
 9. 移除 manual promotion 和 Candidate lifecycle UI/loader：completed。
 10. 生产级 next-Session atomic activation adapter：completed for Role/Skill。
 11. EngineerCat Source Candidate adapter：completed for code Findings and next-process activation。
+12. EngineerCat Codex execution adapter：completed；official SDK behind one role Tool, native fallback retained。
 
 ## Next Steps
 
@@ -72,7 +74,9 @@ flowchart LR
 
 ## Recent Verification
 
-- 清理后 `npm test` passed 556/556 across 100 suites。
+- `npm test` passed 561/561 across 102 suites。
+- EngineerCat 相关 focused tests passed 31/31 across 5 suites；真实官方 SDK read-only start/resume smoke 保持同一 thread id，且没有文件改动或外部工具调用；macOS arm64 packaged adapter resume 也通过。
+- 真实 EngineerCat production-path E2E 经共享 Agent loop 新建 Codex thread，并在下一用户轮指定返回的 `thread_id` 成功续接；角色仍只暴露一个 Codex Tool。
 - Role/Skill 生命周期清理 focused tests passed 42/42 across 9 suites。
 - Shared Arena/Evolution core focused tests passed 45/45 across 8 suites。
 - Lightweight Evolution workflow tests passed 4/4。

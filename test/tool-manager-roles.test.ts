@@ -192,7 +192,7 @@ describe('ToolManager role-specific tools', () => {
     RoleResolver.activateRole('engineer-cat');
     const manager = createRoleAwareToolManager();
     const visibleToolNames = manager.getToolDefinitions().map(tool => tool.name);
-    for (const toolName of ['read_file', 'write_file', 'edit_file', 'glob', 'grep', 'execute_shell']) {
+    for (const toolName of ['read_file', 'write_file', 'edit_file', 'glob', 'grep', 'execute_shell', 'codex_run']) {
       assert.ok(visibleToolNames.includes(toolName), `${toolName} should be visible to EngineerCat`);
     }
     assert.ok(visibleToolNames.includes('skill'));

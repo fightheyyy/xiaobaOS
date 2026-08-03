@@ -1,7 +1,7 @@
 # Agent Runtime SPEC
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-08-03
 适用范围：XiaoBa 的核心 agent harness runtime，包括 `src/core`、`src/providers`、`src/tools`、`src/types/tool.ts` 和 runtime-facing harness docs。
 
 本文是顶层架构模块之一的 Agent Runtime spec。它定义 agent loop、provider transcript、tool boundary 和 session lifecycle；入口、角色策略、观测证据、评测和 Arena 分别由各自模块 spec 维护。
@@ -32,6 +32,8 @@ Out of scope:
 
 当前 runtime 已经以 `AgentSession` 和 `ConversationRunner` 为主线，入口和角色最终都进入同一套 runner。`PromptManager` 负责读取 role/base prompts、展开 `{{include:...}}` prompt fragments，并通过 `prompts/surface.md` 向 `AgentSession` 提供共享 channel delivery prompt。ToolManager 支持 base / role / surface 三层过滤，并已增加 role 声明式 `skill_scoped` 可见性 resolver 与 confirmed tool gate；隔离 runtime 可以显式注入已经从 snapshot 解析的 `roleConfig`，从同一个 ToolManager 计算真实 registered/provider-visible tool 集，而不修改进程级 role 环境。confirmed gate 现在分成 provider-visible 的无否定显式确认检查和 execution-time payload binding 检查，确认类工具即使被硬调也必须让 tool args 与最近确认 turn 或上一条 assistant 提案形成可验证匹配。ConversationRunner 每次 provider request 前都会用当前 active skill 重新解析 provider-visible tools；channel surface 默认只有显式 `send_text` / `send_file` 会产生用户可见输出，final text 只写入 provider/session trace，不自动外发。`delivery_fallback_final_reply` 保留为显式 opt-in 策略，开启时才记录 synthetic `send_text` ToolResult、`delivery_evidence` 和可选 external receipt。Tool result 现在通过 `src/tools/tool-result.ts` 的 canonical builder/canonicalizer 统一收口，覆盖 ToolManager、AgentToolExecutor、SubAgent forbidden results 和 ConversationRunner retry/cancel/fallback delivery results，保证 status/error_code/retryable/duration evidence v1 不再由各 executor 分散拼装；live `ToolExecutionOutput` 也可显式声明 `status/error_code/blocked_reason/retryable/retry_budget`，ToolManager 和 AgentToolExecutor 会优先使用这些结构化字段，只有 legacy string output 才进入中文/英文前缀分类兼容路径。core tools 以及 ResearcherCat / InspectorCat / ReviewerCat / UserCat maintained role tools 已能产出显式 artifact evidence，AgentToolExecutor 也会保留 `Tool.getArtifactManifest()` 的 tool-owned evidence；EngineerCat 通过显式 allowlist 复用文件、搜索、Shell、Skill、子侧 `ask_parent` 及同一个 evidence contract，不继承 Base 的父侧 SubAgent 调度控制工具。structured outbound delivery evidence 已有 `delivery_evidence_contract` v1 hard verifier，覆盖 deterministic `send_text` / `send_file` 正负例、opt-in fallback final reply evidence 以及 production entrypoint Surface Runtime / Surface Runtime File replay；Surface Full deterministic gate 现在还固定 message/file/upload/download 的 external delivery receipt shape；`session-log-v2` provider transcript boundary 现在还有 schema semantic gate，拒绝把 raw messages/tool payload 放进 provider transcript ref；`src/observability` 维护本地 summary、local metric/span helpers 和 trace continuity，并能显式启用一个脱敏、fail-open 的 OTLP trace exporter；provider/durable/working trace 的严格分离仍在推进中。
 
+Current addendum：EngineerCat 现在通过唯一 role-scoped `codex_run` 调用官方 `@openai/codex-sdk`。该窄适配器从可信 `ToolExecutionContext` 取得 cwd 和 AbortSignal，模型只能提供 task、只读/可写模式和可选 `thread_id`。它关闭 Codex web/network、已配置 MCP server、plugins、hooks 和 multi-agent，过滤传入子进程的环境，并把 usage、命令摘要、文件变更、artifact 和失败归一为标准 ToolResult。Arena clean runtime 和确定性 Source Candidate builder 都 fail closed，不会产生未计费的外部模型调用。XiaoBa 不维护 Codex job manager/supervisor，原生 coding tools 保留为小修改和降级路径。
+
 Current addendum：live `AgentSession` provider/model failure path now emits a structured `runtime_event` with `event_type=provider_error` before writing the fallback turn. The event records provider error facts (`provider`、`model`、`endpoint`、`status`、`error_code`、`retryable`、`message`) plus surface, token counters and session-local provider failure budget facts (`status`、`retry_count`、`retry_budget`、`retry_budget_exhausted`、`blocked_reason`、`provider_failure_budget`). Consecutive same-fingerprint retryable provider failures converge to `status=blocked`; non-retryable provider failures are blocked immediately.
 
 Current addendum：the same live provider/model failure path now marks the fallback turn's provider transcript boundary as degraded without retaining raw provider transcript payload. `AgentSession` emits `state_boundary.provider_transcript.ref=provider-transcripts/sha256:<digest>` for all turns; provider failure turns add `status=degraded|blocked`、`degraded=true`、`degradation_reason/error_code`、`fallback_chain`、`blocked_reason` and explicit false raw payload flags. This means local live runtime evidence now matches the Contract Sentinel provider transcript degradation shape, while production-network cross-provider orchestration remains future work.
@@ -48,7 +50,7 @@ Current addendum：每个 `SubAgentSession` 写入独立的标准 `logs/sessions
 
 Current addendum：Case Replay 现在默认使用专用只读 ToolManager，只暴露 `read_file`、`glob` 与 `grep`；正式 Case adapter 还会放入隔离子进程。显式 `workspace_write` Case 只有在 Arena/Evolution clean runtime 设置 enforced sandbox 时才能获得候选工作区的文件与 Shell 工具；delivery、Browser、GUI 和 Secretary 工具始终不注册。Source Candidate Test 复用 macOS Seatbelt：允许读取系统 runtime 与依赖、禁止读取生产源码，并且只允许写候选副本、测试临时目录与一次性 BrowserCat 短 runtime 根；两个会自行创建原生沙箱的 contract test file 单独运行其自身 sandbox，避免无意义的 sandbox nesting。沙箱不可用时 fail closed。
 
-Current addendum：code Finding 通过一次性 `delegate_code` 从 EvolutionCat 路由到 EngineerCat。EngineerCat 仍运行同一个 `SubAgentSession` / `ConversationRunner` loop，只在 secret-free 源码副本内写入。候选完成完整 build、repository tests 和 shared Eval 后，source + dist 以可回滚文件事务替换，并只由下一进程加载；这不是第二套 Agent runtime 或 Candidate lifecycle。
+Current addendum：code Finding 通过一次性 `delegate_code` 从 EvolutionCat 路由到 EngineerCat。EngineerCat 仍运行同一个 `SubAgentSession` / `ConversationRunner` loop，只在 secret-free 源码副本内写入。确定性 Source Candidate builder 显式隐藏 `codex_run`，候选完成完整 build、repository tests 和 shared Eval 后，source + dist 以可回滚文件事务替换，并只由下一进程加载；这不是第二套 XiaoBa runtime 或 Candidate lifecycle。
 
 Current addendum：显式配置 `allowedWriteRoot` 的窄 SubAgent workflow 现在同时约束文件写工具和 Shell。`write_file` / `edit_file` 拒绝绝对路径、`..` 与 symlink escape；macOS Shell 通过 Seatbelt 包装，允许广泛读取但只允许写 `allowedWriteRoot`，HOME/TMP 也落在该根目录。Seatbelt 不可用时该受限 Shell fail closed，普通未配置 `allowedWriteRoot` 的 SubAgent 行为不变。EngineerCat 没有独立的内层写控制面，Scheduled Repair 直接在这套共享工具边界内运行。
 
@@ -77,6 +79,8 @@ flowchart LR
         CompactEvidence["compact evidence<br/>event + after snapshot"]
         EvolutionControl["Evolution control<br/>shared Test + Eval"]
         WriteBoundary["SubAgent write boundary<br/>path guard + Seatbelt"]
+        CodexAdapter["EngineerCat codex_run<br/>official SDK boundary"]
+        CodexThread["local Codex thread<br/>start / resume"]
     end
 
     subgraph Outputs["Outputs"]
@@ -107,6 +111,9 @@ flowchart LR
     Runner --> ToolManager
     ToolManager --> Visibility
     ToolManager --> Tools
+    ToolManager --> CodexAdapter
+    CodexAdapter --> CodexThread
+    CodexThread --> ToolResults
     Tools --> ToolResults
     ToolResults --> Runner
     Runner --> Reply
@@ -157,6 +164,11 @@ flowchart LR
         DriverResult["external driver result<br/>trust / version / outcome"]
     end
 
+    subgraph CodingExecutor["Optional coding executor"]
+        CodexAdapter["EngineerCat codex_run<br/>fixed cwd + access mode + abort"]
+        CodexThread["local Codex thread<br/>start or resume"]
+    end
+
     subgraph Downstream["Downstream"]
         Evidence["state/evidence"]
         Gates["contract tests / benchmarks"]
@@ -185,6 +197,9 @@ flowchart LR
     Tools --> ToolResult
     Tools --> Artifact
     Tools --> DriverResult
+    Tools --> CodexAdapter
+    CodexAdapter --> CodexThread
+    CodexThread --> ToolResult
     Runner --> RuntimeEvent
     Runner --> Delivery
     Runner --> LocalSummary
@@ -231,6 +246,7 @@ flowchart LR
 - Retry 必须有上限；重复失败后应改变策略或报告 blocked reason。显式 `retryable` 的 ToolResult retry exhausted 后必须进入 `blocked` 终态并记录 `retry_count` / `retry_budget` / `retry_budget_exhausted`；同一 run 内重复出现同名、同参、同错误的不可重试 ToolResult，必须在 bounded failure budget 后由 `ConversationRunner` 收束为 `blocked` ToolResult，并记录 prior failure count、budget exhaustion 和 `blocked_reason`；interrupt/cancel 必须进入 `cancelled` 终态且不可重试。
 - SubAgent stop 必须中断 waiting input、role-tool AbortSignal 和 retry backoff，并阻止迟到 callback 进入已关闭的 CLI session；provider HTTP 和通用 Shell 只有在各自 adapter 消费 AbortSignal 后才能声称物理取消，当前仍是明确缺口。
 - 外部 browser/GUI driver 只能通过 role-scoped typed tool adapter 进入 Runtime。Adapter 必须使用 fixed binary + `execFile(argv[])`、显式 timeout/AbortSignal、结构化 error code 和不可信内容标记；不得使用 Shell、动态 `npx latest`、MCP sidecar 或 driver 自带 Agent loop 绕过 ToolManager。
+- EngineerCat 是外部 coding executor 的唯一例外入口：`codex_run` 必须是 role-scoped Tool，工作目录来自可信 `ToolExecutionContext`，模型只能选择只读/工作区可写和可选 thread resume。适配器必须传递 AbortSignal，失败必须归一为结构化 ToolResult，不得接受模型提供的 cwd、binary path、network 或 approval policy。XiaoBa 不复制 Codex loop，不引入第二套 job manager/supervisor；续接所需 `thread_id` 只由本次 ToolResult 返回给 EngineerCat。
 - 物理 GUI 是进程外共享副作用资源。GuiCat mutation 在执行前必须持有全局桌面 lease；timeout 后 outcome 为 uncertain，不能自动重放。Browser session identity 由可信父 session、child session 和 workspace 共同派生，使同一父会话并发 BrowserCat 也使用不同 native session。
 - Browser driver 的 HOME、USERPROFILE、XDG、APPDATA、TMP、socket 和 restore state 必须落在 Runtime 私有目录；不能为了 Chrome discovery 暴露真实 HOME。Unix runtime 根使用短原子 `/tmp/xab-*` 目录以满足 macOS Unix socket path limit。
 

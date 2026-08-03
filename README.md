@@ -146,7 +146,7 @@ Base Main Agent 是唯一面向用户的沟通和调度入口。八个 Role 复�
 
 | 类型 | Role | 责任 |
 | --- | --- | --- |
-| 执行 | EngineerCat | 共享 XiaoBa Agent loop 的原生 coding Role；负责代码、仓库、构建和工程修复 |
+| 执行 | EngineerCat | 共享 XiaoBa Agent loop 的 coding owner；实质性编码可经窄适配器委托 Codex，原生工具作为小修改和降级路径 |
 | 执行 | BrowserCat | 受限、可验证的浏览器接管 |
 | 执行 | GuiCat | macOS 桌面 GUI 接管 |
 | 执行 | SecretaryCat | 飞书工作流；`FeishuCat` 是别名，领域能力来自官方 `lark-cli` |
@@ -157,7 +157,7 @@ Base Main Agent 是唯一面向用户的沟通和调度入口。八个 Role 复�
 
 Browser、GUI 和飞书 driver 只提供确定性能力，不启动第二套 Chat、Agent 或 MCP loop。详细用法见 [Roles Guide](roles/README.md) 和 [Skills Guide](skills/README.md)。
 
-EngineerCat 同样不包装第二套 coding-agent runtime：Base 在外部管理它的 SubAgent 生命周期，EngineerCat 只使用受限 coding / Skill 工具和子侧 `ask_parent` 完成实现与验证。
+EngineerCat 仍使用 XiaoBa 的 SubAgent 生命周期，但多一个受限 `codex_run` Tool 作为外部 coding executor。XiaoBa 不复制 Codex loop，也不保存第二套 job/session 状态；详细的安全边界和登录要求见 [Roles Guide](roles/README.md)。
 
 ## 受控进化
 

@@ -1,7 +1,7 @@
 # XiaoBa-CLI SPEC
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-08-03
 适用范围：`XiaoBa-CLI` 整体架构、agent harness 边界、核心状态机、运行证据和评测闭环。
 
 本文是 `XiaoBa-CLI` 的项目级架构真相源。项目只维护本文和六个模块 SPEC；角色、benchmark、desktop、test 和实验实现不再各自复制架构文档。
@@ -69,6 +69,8 @@ flowchart LR
         direction TB
         Runtime["Agent Runtime<br/>session / model / tools"]
         Policy["Roles & Skills<br/>Base + 8 Roles; zero default Base Skills"]
+        CodexAdapter["EngineerCat codex_run<br/>narrow external executor adapter"]
+        Codex["local Codex thread"]
     end
     subgraph Facts["3) Record"]
         direction TB
@@ -88,6 +90,8 @@ flowchart LR
 
     Surface --> Runtime
     Policy --> Runtime
+    Runtime --> CodexAdapter
+    CodexAdapter --> Codex
     Runtime --> Evidence
     Evidence --> Otel
     Runtime --> Test
@@ -111,6 +115,8 @@ Case 把问题变成可执行实验，Outcome 是一次真实执行的唯一裁�
 flowchart LR
     Surface["Surface<br/>CLI / IM / Pet / Dashboard"] --> Runtime["Agent Runtime<br/>one shared loop"]
     Roles["Roles & Skills<br/>8 shared Roles"] --> Runtime
+    Runtime --> EngineerAdapter["EngineerCat Codex adapter<br/>optional external executor"]
+    EngineerAdapter --> Codex["local Codex thread"]
     Runtime --> Trace["Trace<br/>shared runtime evidence"]
 
     Test["Test<br/>implementation correctness"] --> TestResult["TestResult"]
@@ -142,6 +148,9 @@ flowchart LR
 - Evolution 可以从 Trace 或失败 Case 开始，但 Repair 前必须已有可 Replay
   Case。EngineerCat 修改代码，EvolutionCat 修改 Role / Skill / Memory；
   Candidate 复用 Test + Eval，通过后按 capability 新 Session / code 下一进程边界自动激活。
+- EngineerCat 保留 XiaoBa 原生 coding tools 作为小修改和降级路径，并可通过一个 role-scoped
+  `codex_run` Tool 把实质性编码委托给本机 Codex。XiaoBa 只提供固定工作区、只读/可写模式、
+  AbortSignal 和结构化 ToolResult；不复制 Codex 的 agent loop，不保存第二套 job/session 状态。
 
 ## 核心组件边界
 
