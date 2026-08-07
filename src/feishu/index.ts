@@ -17,6 +17,13 @@ import { ChimeInJudge } from '../bridge/chime-in-judge';
 import { ChannelCallbacks } from '../types/tool';
 import { randomUUID } from 'crypto';
 import { RoleResolver } from '../utils/role-resolver';
+import { ConversationContent } from '../utils/conversation-journal';
+import {
+  ConversationTurnContext,
+  journalVisibleChannel,
+  recordVisibleInbound,
+  reserveConversationTraceId,
+} from '../utils/conversation-surface';
 
 interface PendingAttachment {
   fileName: string;
@@ -39,6 +46,7 @@ interface QueuedMessage {
   chatId: string;
   senderId: string;
   traceparent?: string;
+  traceId: string;
 }
 
 interface FeishuBotRuntimeOverrides {
@@ -49,6 +57,13 @@ interface FeishuBotRuntimeOverrides {
 }
 
 const PENDING_ANSWER_TIMEOUT_MS = 120_000;
+
+export function buildFeishuVisibleInboundContent(text: string, fileName?: string): ConversationContent[] {
+  const content: ConversationContent[] = [];
+  if (text.trim()) content.push({ type: 'text', text });
+  if (fileName) content.push({ type: 'file', name: fileName });
+  return content.length > 0 ? content : [{ type: 'text', text: '[消息]' }];
+}
 
 /** 从 Group/*.md 解析同事档案 */
 interface TeammateInfo { name: string; role: string; expertise: string }
@@ -167,8 +182,10 @@ export class FeishuBot {
       'feishu',
       config.sessionTTL,
     );
-    this.sessionManager.setWakeupSendFn(async (channelId, text) => {
-      await this.sender.reply(channelId, text);
+    this.sessionManager.setWakeupSendFn(async (channelId, text, sessionKey) => {
+      const turn = this.createTurnContext(sessionKey);
+      const channel = journalVisibleChannel(turn, this.buildChannel(channelId, { sessionKey }));
+      await channel.reply(channelId, text);
     });
 
     // H1: 注入同事档案到 session
@@ -278,6 +295,12 @@ export class FeishuBot {
     const key = msg.chatType === 'group'
       ? `group:${msg.chatId}`
       : `user:${msg.senderId}`;
+    const turn = await recordVisibleInbound({
+      surface: 'feishu',
+      sessionKey: key,
+      content: buildFeishuVisibleInboundContent(msg.text, msg.file?.fileName),
+      sourceEventId: msg.messageId,
+    });
 
     // ── 拦截：如果当前 session 正在等待回答，按 sender 精确匹配 ──
     const pendingId = this.pendingAnswerBySession.get(key);
@@ -315,14 +338,15 @@ export class FeishuBot {
       if (!command) return;
       const args = parts.slice(1);
 
-      const commandChannel = this.buildChannel(msg.chatId, {
+      const commandChannel = journalVisibleChannel(this.withRole(turn), this.buildChannel(msg.chatId, {
         sessionKey: key,
         senderId: msg.senderId,
-      });
+      }));
       const result = await session.handleCommand(command, args, {
         channel: commandChannel,
         surface: 'feishu',
         traceparent: msg.traceparent,
+        traceId: turn.traceId,
       });
       const commandName = command.toLowerCase();
       const isBuiltInCommand = ['stop', 'clear', 'skills', 'history', 'exit'].includes(commandName);
@@ -330,7 +354,7 @@ export class FeishuBot {
       const shouldDirectReply = Boolean(reply)
         && (isBuiltInCommand || args.length === 0 || result.finalResponseVisible === true);
       if (result.handled && shouldDirectReply && reply) {
-        await this.sender.reply(msg.chatId, reply);
+        await commandChannel.reply(msg.chatId, reply);
         Logger.info(`[feishu_command_reply] 已发送: ${reply.slice(0, 80)}...`);
       }
       if (result.handled && commandName === 'clear') {
@@ -357,7 +381,11 @@ export class FeishuBot {
         msg.file.fileName,
       );
       if (!localPath) {
-        await this.sender.reply(msg.chatId, `文件下载失败：${msg.file.fileName}\n请重试上传。`);
+        const failedDownloadChannel = journalVisibleChannel(this.withRole(turn), this.buildChannel(msg.chatId, {
+          sessionKey: key,
+          senderId: msg.senderId,
+        }));
+        await failedDownloadChannel.reply(msg.chatId, `文件下载失败：${msg.file.fileName}\n请重试上传。`);
         return;
       }
 
@@ -386,22 +414,33 @@ export class FeishuBot {
         session.runWithLogContext(() => Logger.warning(`[${key}] 检测到用户中断请求，已请求中止当前回合`));
       }
       const queue = this.messageQueue.get(key) ?? [];
-      queue.push({ userText, chatId: msg.chatId, senderId: msg.senderId, traceparent: msg.traceparent });
+      queue.push({
+        userText,
+        chatId: msg.chatId,
+        senderId: msg.senderId,
+        traceparent: msg.traceparent,
+        traceId: turn.traceId,
+      });
       this.messageQueue.set(key, queue);
       session.runWithLogContext(() => Logger.info(`[${key}] 主会话忙，消息已入队 (队列长度: ${queue.length})`));
       return;
     }
 
     // 构建平台通道回调，通过 context 传递给工具（替代 bind/unbind）
-    const channel = this.buildChannel(msg.chatId, {
+    const channel = journalVisibleChannel(this.withRole(turn), this.buildChannel(msg.chatId, {
       sessionKey: key,
       senderId: msg.senderId,
-    });
+    }));
 
     try {
-      const result = await session.handleMessage(userText, { channel, surface: 'feishu', traceparent: msg.traceparent });
+      const result = await session.handleMessage(userText, {
+        channel,
+        surface: 'feishu',
+        traceparent: msg.traceparent,
+        traceId: turn.traceId,
+      });
       if (result.finalResponseVisible && result.text) {
-        await this.sender.reply(msg.chatId, result.text);
+        await channel.reply(msg.chatId, result.text);
       }
     } finally {
       this.clearPendingAnswerBySession(key);
@@ -437,19 +476,24 @@ export class FeishuBot {
         continue;
       }
 
-      const channel = this.buildChannel(chatId, {
+      const turn = this.createTurnContext(sessionKey);
+      const channel = journalVisibleChannel(turn, this.buildChannel(chatId, {
         sessionKey,
         senderId,
-      });
+      }));
 
       try {
-        const result = await session.handleMessage(text, { channel, surface: 'feishu' });
+        const result = await session.handleMessage(text, {
+          channel,
+          surface: 'feishu',
+          traceId: turn.traceId,
+        });
         if (result.text === BUSY_MESSAGE) {
           session.runWithLogContext(() => Logger.info(`[${sessionKey}] 主会话竞态忙碌，将重试`));
           continue;
         }
         if (result.finalResponseVisible && result.text) {
-          await this.sender.reply(chatId, result.text);
+          await channel.reply(chatId, result.text);
         }
         await this.drainMessageQueue(sessionKey);
         return;
@@ -479,15 +523,21 @@ export class FeishuBot {
 
     const last = messages[messages.length - 1];
     const session = this.sessionManager.getOrCreate(sessionKey);
-    const channel = this.buildChannel(last.chatId, {
+    const turn = this.createTurnContext(sessionKey, last.traceId);
+    const channel = journalVisibleChannel(turn, this.buildChannel(last.chatId, {
       sessionKey,
       senderId: last.senderId,
-    });
+    }));
 
     try {
-      const result = await session.handleMessage(mergedText, { channel, surface: 'feishu', traceparent: last.traceparent });
+      const result = await session.handleMessage(mergedText, {
+        channel,
+        surface: 'feishu',
+        traceparent: last.traceparent,
+        traceId: turn.traceId,
+      });
       if (result.finalResponseVisible && result.text) {
-        await this.sender.reply(last.chatId, result.text);
+        await channel.reply(last.chatId, result.text);
       }
     } finally {
       this.clearPendingAnswerBySession(sessionKey);
@@ -576,13 +626,23 @@ export class FeishuBot {
 
     if (session.isBusy()) {
       const queue = this.messageQueue.get(sessionKey) ?? [];
-      queue.push({ userText: messageText, chatId: msg.chat_id, senderId: '' });
+      queue.push({
+        userText: messageText,
+        chatId: msg.chat_id,
+        senderId: '',
+        traceId: reserveConversationTraceId('feishu', sessionKey),
+      });
       this.messageQueue.set(sessionKey, queue);
       return;
     }
-    const channel = this.buildChannel(msg.chat_id);
+    const turn = this.createTurnContext(sessionKey);
+    const channel = journalVisibleChannel(turn, this.buildChannel(msg.chat_id, { sessionKey }));
     try {
-      await session.handleMessage(messageText, { channel, surface: 'feishu' });
+      await session.handleMessage(messageText, {
+        channel,
+        surface: 'feishu',
+        traceId: turn.traceId,
+      });
     } finally {
       this.clearPendingAnswerBySession(sessionKey);
     }
@@ -700,4 +760,20 @@ export class FeishuBot {
     ];
     return patterns.some(p => p.test(normalized));
   }
+
+  private createTurnContext(sessionKey: string, traceId?: string): ConversationTurnContext {
+    return this.withRole({
+      surface: 'feishu',
+      sessionKey,
+      traceId: traceId || reserveConversationTraceId('feishu', sessionKey),
+    });
+  }
+
+  private withRole(turn: ConversationTurnContext): ConversationTurnContext {
+    return {
+      ...turn,
+      ...(this.agentServices.roleName ? { roleName: this.agentServices.roleName } : {}),
+    };
+  }
+
 }

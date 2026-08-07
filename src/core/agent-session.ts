@@ -63,6 +63,8 @@ export interface HandleMessageOptions {
   observabilityContext?: ObservabilitySpanContext;
   /** W3C traceparent；runtime 只在内存中解析为 parent context，不写入本地 evidence。 */
   traceparent?: string;
+  /** XiaoBa 本地 trace identity；用于关联用户可见 Conversation Journal 与 session evidence。 */
+  traceId?: string;
   /** Channel surface final text fallback；默认 false，开启后才把 final text 合成为 send_text 交付。 */
   deliveryFallbackFinalReply?: boolean;
 }
@@ -74,6 +76,7 @@ export interface HandleCommandOptions {
   surface?: ToolSurface;
   observabilityContext?: ObservabilitySpanContext;
   traceparent?: string;
+  traceId?: string;
   deliveryFallbackFinalReply?: boolean;
 }
 
@@ -294,6 +297,7 @@ export class AgentSession {
       let explicitSurface: ToolSurface | undefined;
       let explicitObservabilityContext: ObservabilitySpanContext | undefined;
       let explicitTraceparent: string | undefined;
+      let explicitTraceId: string | undefined;
       let deliveryFallbackFinalReply = false;
 
       if (callbacksOrOptions) {
@@ -305,6 +309,7 @@ export class AgentSession {
           explicitSurface = opts.surface;
           explicitObservabilityContext = opts.observabilityContext;
           explicitTraceparent = opts.traceparent;
+          explicitTraceId = opts.traceId;
           deliveryFallbackFinalReply = opts.deliveryFallbackFinalReply === true;
         } else {
           // 旧签名 SessionCallbacks
@@ -566,6 +571,7 @@ export class AgentSession {
           { prompt: metrics.totalPromptTokens, completion: metrics.totalCompletionTokens },
           result.toolVisibility,
           this.buildStateBoundary(surface),
+          explicitTraceId,
         );
 
         observability.mirrorMetric('xiaoba.session.completed', 1, completionAttrs);
@@ -654,6 +660,7 @@ export class AgentSession {
             providerError: providerErrorEvidence,
             failureBudget: providerFailureBudget,
           }),
+          explicitTraceId,
         );
 
         finishSessionSpan('error', {
@@ -1376,6 +1383,7 @@ ${conversationText}`;
       || 'surface' in value
       || 'observabilityContext' in value
       || 'traceparent' in value
+      || 'traceId' in value
       || 'deliveryFallbackFinalReply' in value
     );
   }
@@ -1388,6 +1396,7 @@ ${conversationText}`;
       || 'surface' in callbacksOrOptions
       || 'observabilityContext' in callbacksOrOptions
       || 'traceparent' in callbacksOrOptions
+      || 'traceId' in callbacksOrOptions
       || 'deliveryFallbackFinalReply' in callbacksOrOptions
     ) {
       return callbacksOrOptions as HandleCommandOptions;
@@ -1471,6 +1480,7 @@ ${conversationText}`;
         logInput: context.userMessage,
         observabilityContext: options.observabilityContext,
         traceparent: options.traceparent,
+        traceId: options.traceId,
         deliveryFallbackFinalReply: options.deliveryFallbackFinalReply,
       });
       return {

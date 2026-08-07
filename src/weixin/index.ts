@@ -13,6 +13,13 @@ import { ChannelCallbacks } from '../types/tool';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { RoleResolver } from '../utils/role-resolver';
+import { ConversationContent } from '../utils/conversation-journal';
+import {
+  ConversationTurnContext,
+  journalVisibleChannel,
+  recordVisibleInbound,
+  reserveConversationTraceId,
+} from '../utils/conversation-surface';
 
 const CHANNEL_VERSION = 'xiaoba-weixin/1.0';
 const DEFAULT_LONGPOLL_MS = 30000;
@@ -50,10 +57,10 @@ export class WeixinBot {
   }
 
   private setupChannelCallbacks(): void {
-    this.sessionManager.setWakeupSendFn((chatId, text) => {
-      const userId = chatId.replace('user:', '');
-      const contextToken = this.contextTokens.get(chatId);
-      return this.sender.sendText(userId, text, contextToken);
+    this.sessionManager.setWakeupSendFn(async (chatId, text, sessionKey) => {
+      const turn = this.createTurnContext(sessionKey);
+      const channel = journalVisibleChannel(turn, this.buildChannel(chatId, sessionKey));
+      await channel.reply(chatId, text);
     });
   }
 
@@ -192,6 +199,12 @@ export class WeixinBot {
 
     const parsed = this.handler.parseMessage(msg);
     if (!parsed || this.handler.shouldIgnoreMessage(parsed)) return;
+    const turn = await recordVisibleInbound({
+      surface: 'weixin',
+      sessionKey,
+      content: this.visibleInboundContent(parsed),
+      sourceEventId: parsed.message_id,
+    });
 
     const mediaFiles = await this.handler.downloadMedia(parsed);
     const hasMedia = mediaFiles.length > 0;
@@ -202,7 +215,7 @@ export class WeixinBot {
 
     const session = this.sessionManager.getOrCreate(sessionKey, msg.to_user_id);
     session.runWithLogContext(() => Logger.info(`[${sessionKey}] 收到消息: ${parsed.text?.slice(0, 50) || '[媒体消息]'}${mediaDesc}...`));
-    const channel = this.buildChannel(msg.to_user_id, sessionKey);
+    const channel = journalVisibleChannel(this.withRole(turn), this.buildChannel(msg.to_user_id, sessionKey));
     SubAgentManager.getInstance().registerPlatformCallbacks(sessionKey, {
       injectMessage: text => this.handleSubAgentFeedback(sessionKey, msg.to_user_id, text),
     });
@@ -218,7 +231,11 @@ export class WeixinBot {
       userText = userText ? `${userText}\n${attachmentContext}` : `[用户仅上传了附件，暂未给出明确任务]\n${attachmentContext}`;
     }
 
-    const result = await session.handleMessage(userText, { channel, surface: 'weixin' });
+    const result = await session.handleMessage(userText, {
+      channel,
+      surface: 'weixin',
+      traceId: turn.traceId,
+    });
     await this.sendFinalResponseIfVisible(channel, result);
   }
 
@@ -237,10 +254,12 @@ export class WeixinBot {
         continue;
       }
 
-      const channel = this.buildChannel(chatId, sessionKey);
+      const turn = this.createTurnContext(sessionKey);
+      const channel = journalVisibleChannel(turn, this.buildChannel(chatId, sessionKey));
       const result = await session.handleMessage(text, {
         channel,
         surface: 'weixin',
+        traceId: turn.traceId,
       });
       if (result.text === BUSY_MESSAGE) {
         session.runWithLogContext(() => Logger.info(`[${sessionKey}] 主会话竞态忙碌，将重试`));
@@ -257,5 +276,33 @@ export class WeixinBot {
     this.isRunning = false;
     await this.sessionManager.destroy();
     Logger.info('[微信] 机器人已停止');
+  }
+
+  private createTurnContext(sessionKey: string): ConversationTurnContext {
+    return this.withRole({
+      surface: 'weixin',
+      sessionKey,
+      traceId: reserveConversationTraceId('weixin', sessionKey),
+    });
+  }
+
+  private withRole(turn: ConversationTurnContext): ConversationTurnContext {
+    return {
+      ...turn,
+      ...(this.agentServices.roleName ? { roleName: this.agentServices.roleName } : {}),
+    };
+  }
+
+  private visibleInboundContent(message: WeixinMessage): ConversationContent[] {
+    const content: ConversationContent[] = [];
+    if (message.text) content.push({ type: 'text', text: message.text });
+    for (const item of message.item_list || []) {
+      if (item.type === 2) {
+        content.push({ type: 'file', name: 'image.jpg' });
+      } else if (item.type === 4) {
+        content.push({ type: 'file', name: item.file_item?.file_name || 'unknown' });
+      }
+    }
+    return content.length > 0 ? content : [{ type: 'text', text: '[媒体消息]' }];
   }
 }

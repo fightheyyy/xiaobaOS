@@ -59,6 +59,7 @@ flowchart LR
     Entrypoints["CLI / IM / Pet / Dashboard / Electron"] --> Contract["One surface contract<br/>auth / session / files / callbacks"]
     Contract --> Runtime["Shared agent runtime"]
     Runtime --> Delivery["Visible delivery + evidence"]
+    Delivery --> Conversation["Conversation Journal<br/>visible messages only"]
     Delivery --> Verify["Surface contract tests"]
     Verify --> Contract
     CLI["CLI control plane"] --> Evolution["Lightweight Evolution trigger"]
@@ -69,6 +70,7 @@ flowchart LR
 ## Contracts
 
 - 每个入口必须显式传入 `surface`，不能从 session key 反推入口类型。
+- 每个入口的用户输入和实际可见交付必须进入共享 Conversation Journal；未交付 final text、thinking 和 tool internals 不得写入该 Journal。
 - Feishu Surface 配置的 App ID 是 XiaoBa 飞书能力的 canonical application identity。SecretaryCat 使用官方 `lark-cli` 时必须选择 App ID 相同的 profile；`bot` 和 `user` 是同一应用下的 actor identity。XiaoBa 不复制凭据存储，也不隐式切换 `lark-cli` 的全局 active profile。
 - 每个入口的 raw event / route payload 应能归一化为稳定 surface event：surface、event type、event id、session key、channel id、user id、user message、payload type 和必要 metadata。
 - Pet/Dashboard 的 `pet:<petId>:role-<role>` session key，以及 `pet:<petId>:role-<role>:<safe-suffix>` 这类带附加隔离后缀的 session key，必须创建或复用对应角色的 scoped services；`/skills`、skill 激活、tool allowlist、visible history 和 SSE replay 都必须按归一化后的 session key 隔离，`role-base` 归一到默认 `pet:<petId>`。

@@ -1,8 +1,12 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import {
   cleanupCliOneShotSubAgents,
   registerCliSubAgentCallbacks,
+  sendSingleMessage,
   settleCliOneShotSubAgents,
   shouldRenderCliRuntimeLogs,
   shouldRestoreCliSession,
@@ -10,6 +14,7 @@ import {
 import { SubAgentManager } from '../src/core/sub-agent-manager';
 import { ChatResponse, Message } from '../src/types';
 import { ToolDefinition } from '../src/types/tool';
+import { resetConversationJournalForTests } from '../src/utils/conversation-journal';
 
 class ImmediateCliSubAgentAIService {
   async chatStream(_messages: Message[], _tools: ToolDefinition[]): Promise<ChatResponse> {
@@ -74,6 +79,50 @@ describe('CLI chat command options', () => {
     assert.equal(shouldRenderCliRuntimeLogs({}), false);
     assert.equal(shouldRenderCliRuntimeLogs({ verbose: false }), false);
     assert.equal(shouldRenderCliRuntimeLogs({ verbose: true }), true);
+  });
+
+  test('one-shot CLI journals one inbound and one aggregated streamed reply', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoba-cli-conversation-'));
+    const sessionKey = 'cli:conversation-contract';
+    const journal = resetConversationJournalForTests({
+      workingDirectory: root,
+      env: {
+        NODE_ENV: 'test',
+        XIAOBA_CONVERSATION_RECORDING_ENABLED: 'true',
+      },
+    });
+
+    try {
+      const session = {
+        key: sessionKey,
+        handleMessage: async (_message: string, options: any) => {
+          options.callbacks.onText?.('streamed reply');
+          return {
+            text: 'streamed reply',
+            visibleToUser: true,
+            finalResponseVisible: true,
+          };
+        },
+      };
+
+      await sendSingleMessage(session as any, 'hello', {
+        recordInbound: true,
+        roleName: 'engineer-cat',
+      });
+
+      const rows = fs.readFileSync(journal.filePathFor('cli', sessionKey), 'utf8')
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      assert.deepStrictEqual(rows.map(row => row.role), ['user', 'assistant']);
+      assert.deepStrictEqual(rows.map(row => row.sequence), [1, 2]);
+      assert.deepStrictEqual(rows[1].content, [{ type: 'text', text: 'streamed reply' }]);
+      assert.equal(rows[1].role_name, 'engineer-cat');
+      assert.equal(rows[0].trace_id, rows[1].trace_id);
+    } finally {
+      resetConversationJournalForTests({ env: { NODE_ENV: 'test' } });
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('interactive CLI callback receives and drives sub-agent feedback', async () => {

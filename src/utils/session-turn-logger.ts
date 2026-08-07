@@ -234,10 +234,12 @@ export class SessionTurnLogger {
     tokens: { prompt: number; completion: number },
     toolVisibility?: ToolVisibilityLog[],
     stateBoundary?: SessionStateBoundaryLog,
+    reservedTraceId?: string,
   ): void {
     this.traceCounter++;
     const traceIndex = this.traceCounter;
-    const traceId = `${this.safeId(this.sessionId)}.trace.${Date.now().toString(36)}.${traceIndex}`;
+    const traceId = reservedTraceId?.trim()
+      || `${this.safeId(this.sessionId)}.trace.${Date.now().toString(36)}.${traceIndex}`;
     const legacyTurnId = `${this.safeId(this.sessionId)}.turn.${traceIndex}`;
 
     const userText = this.extractText(userInput);

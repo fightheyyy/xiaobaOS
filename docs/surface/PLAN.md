@@ -1,7 +1,7 @@
 # Surface PLAN
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-08-06
 Owner：Surface maintainers
 
 ## Current Status
@@ -16,6 +16,8 @@ Owner：Surface maintainers
 - Dashboard、Pet 和 Bridge 的网络认证与 Owner 授权仍未闭合。
 - `evolution sleep` 与 schedule 已进入轻量 Evolution control；manual promote CLI 已删除。
 - Dashboard capability lifecycle API/UI 已删除；Role/Skill 卡片只保留选择、安装和删除 package。
+- 共享 Conversation Journal / Catena 导出已接入 CLI、Feishu、Weixin 和
+  Pet；Surface 只提供可见输入/成功交付语义，不各自维护第二套聊天存储。
 
 ```mermaid
 flowchart LR
@@ -38,6 +40,7 @@ flowchart LR
 11. Nightly worker timeout and owned-lock cleanup：completed。
 12. Dashboard three-state lifecycle removal：completed。
 13. Lightweight Evolution trigger and activation status：completed for CLI capability new-Session / code next-process activation evidence。
+14. Shared visible Conversation Journal：completed for current CLI、Feishu、Weixin、Pet text/file paths；Catena export remains optional and fail-open。
 
 ## Next Steps
 
@@ -74,6 +77,9 @@ flowchart LR
 
 ## Recent Verification
 
+- Conversation-focused tests pass 52/52 across Journal, shared surface wrapper,
+  AgentSession, CLI, Feishu, Weixin, and Pet. A real Catena round trip preserved
+  the two-message order and displayed only user-visible text/file content.
 - `npm test` passed 556/556 across 100 suites；`npm run build` passed。
 - Surface diagrams reflect the lightweight Evolution CLI and shared Test/Eval activation path.
 - `electron-builder --mac --dir --publish never` passed with the platform-specific optional driver mapping.

@@ -21,6 +21,7 @@ XiaoBa 需要一套轻的观测证据系统：本地 trace JSONL 是 faithful lo
 In scope:
 
 - 以 `SessionTurnLogger` / `logs/sessions/<surface>/<date>/<session_id>/traces.jsonl` 为本地 durable evidence source。
+- 以 `data/conversations/<surface>/*.jsonl` 保存用户实际可见的 append-only Conversation Journal，并通过独立、可选、fail-open 的 Catena HTTPS 导出器同步；Conversation 不走 OTLP。
 - `session-log-projector` 将 trace / embedded runtime_event 投影为 local summary。
 - 本地 span/metric summary helpers，用于 standalone runner 或测试路径。
 - 默认开启的 local in-process summary，优先从 session log 投影产生。
@@ -113,6 +114,7 @@ Current implementation:
 ```mermaid
 flowchart LR
     subgraph LocalTruth["Local truth"]
+        Conversation["conversation journal<br/>visible messages only"]
         JSONL["traces.jsonl<br/>single machine truth"]
         Snapshots["context-snapshots<br/>compact-after state"]
         RuntimeLog["runtime.log<br/>human debug"]
@@ -129,6 +131,7 @@ flowchart LR
     end
 
     subgraph ProductUse["Product use"]
+        CatenaConversation["Catena conversation ingest<br/>Prompt / Memory / Role fuel"]
         Replay["Trace Replay"]
         Debug["Local debug"]
         SleepDigest["nightly evolution digest<br/>derived refs only"]
@@ -138,6 +141,7 @@ flowchart LR
     end
 
     JSONL --> Projector
+    Conversation --> CatenaConversation
     Snapshots --> Debug
     RuntimeLog -.-> Maintainer["human debug"]
     Projector --> Obs
@@ -155,6 +159,7 @@ flowchart LR
 Target rules:
 
 - Observability is evidence, not governance.
+- Conversation Journal and Trace are separate evidence classes: Conversation records what the user saw; Trace records how the Runtime executed. They may share `trace_id` but neither is reconstructed from the other.
 - Local runtime facts enter observability through `traces.jsonl` projection when a session log exists; the local trace log is raw local evidence before persistence.
 - Context compression must leave a structured `context_compaction` event in `traces.jsonl`; successful compactions must store the compact-after messages as local snapshot evidence next to the owning session log. These snapshots are evidence/restoration anchors, not default prompt material for replay.
 - Direct runtime metric recording is allowed only for standalone runners or explicit local-summary helper paths.
@@ -203,6 +208,7 @@ Local invariants:
 Durable evidence layout:
 
 ```text
+data/conversations/<surface>/<conversation-hash>.jsonl
 logs/sessions/<surface>/<date>/<session-id>/
   traces.jsonl
   runtime.log
@@ -215,3 +221,9 @@ output/eval/**
 ```
 
 `traces.jsonl` is the machine-readable runtime fact source; `runtime.log` is human debug text; snapshots are compact-after recovery/evidence anchors; generated replay/eval outputs are derived artifacts and never replace the source trace.
+
+Conversation export configuration is intentionally vendor-specific because no OTel signal defines authoritative user-visible chat history:
+
+- `XIAOBA_CONVERSATION_RECORDING_ENABLED` controls local Journal recording and defaults on outside tests.
+- `CATENA_BASE_URL` plus `CATENA_API_KEY` enables best-effort HTTPS export to `/v1/ingest/conversations`.
+- `XIAOBA_CONVERSATION_AGENT_ID` optionally identifies one deployed XiaoBaOS Agent; otherwise the OTel service name or `xiaobaos` is used.

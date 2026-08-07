@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { WeixinBot } from '../src/weixin';
 import type { HandleMessageResult } from '../src/core/agent-session';
+import { resetConversationJournalForTests } from '../src/utils/conversation-journal';
 
 class FakeWeixinSender {
   texts: Array<{ to: string; text: string; contextToken?: string }> = [];
@@ -60,6 +61,7 @@ describe('WeixinBot final response delivery', () => {
   const roots: string[] = [];
 
   afterEach(() => {
+    resetConversationJournalForTests({ env: { NODE_ENV: 'test' } });
     for (const root of roots.splice(0)) {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -75,6 +77,13 @@ describe('WeixinBot final response delivery', () => {
       stateDir,
     });
     const sender = new FakeWeixinSender();
+    const journal = resetConversationJournalForTests({
+      workingDirectory: stateDir,
+      env: {
+        NODE_ENV: 'test',
+        XIAOBA_CONVERSATION_RECORDING_ENABLED: 'true',
+      },
+    });
     const session = new FakeWeixinSession({
       text: 'provider error visible to user',
       visibleToUser: true,
@@ -91,6 +100,14 @@ describe('WeixinBot final response delivery', () => {
     assert.deepStrictEqual(sender.texts, [
       { to: 'wx-user', text: 'provider error visible to user', contextToken: 'ctx-1' },
     ]);
+    const journalRows = fs.readFileSync(journal.filePathFor('weixin', 'user:wx-user'), 'utf8')
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line));
+    assert.deepStrictEqual(journalRows.map(row => row.role), ['user', 'assistant']);
+    assert.deepStrictEqual(journalRows[0].content, [{ type: 'text', text: 'hello' }]);
+    assert.deepStrictEqual(journalRows[1].content, [{ type: 'text', text: 'provider error visible to user' }]);
+    assert.strictEqual(journalRows[0].trace_id, journalRows[1].trace_id);
   });
 
   test('does not send hidden final response text', async () => {

@@ -1,7 +1,7 @@
 # XiaoBa-CLI PLAN
 
 状态：Active
-最后更新：2026-08-03
+最后更新：2026-08-06
 Owner：XiaoBa maintainers
 
 本文只维护仓库级当前状态和收敛顺序。模块细节进入六份模块 PLAN。
@@ -15,6 +15,9 @@ XiaoBa-CLI 已形成共享 Agent Runtime、一个 Base Main Agent 和八个默�
 - 所有角色复用 AgentSession / ConversationRunner / ToolManager；Browser/GUI/Feishu driver 不是第二个 Agent loop。EngineerCat 是显式例外，只能经单一 `codex_run` Tool 调用外部 Codex executor，不保存第二套 job/session 状态。
 - CLI、Feishu、Weixin、Pet、Dashboard 和 Electron 共用 Runtime 主链。
 - 本地 Trace、artifact、delivery evidence 和可选 OTLP projection 已有稳定边界。
+- CLI、Feishu、Weixin、Pet 的用户可见消息进入独立 append-only
+  Conversation Journal；配置 Catena 地址和个人 API 密钥后可选同步，且不把
+  system prompt、reasoning、Tool 内部数据或未交付 final text 当作聊天记录。
 - Test / Eval / Trace / Case / Replay 的概念已收敛。
 - 轻量 Evaluation、Arena 和 Evolution orchestration core 已实现并测试。
 - `xiaoba eval run --case-set` 已把 shared Eval core 接成真实 Agent CLI。
@@ -35,6 +38,8 @@ flowchart LR
     Surface["Surface"] --> Runtime["Agent Runtime"]
     Roles["Roles & Skills"] --> Runtime
     Runtime --> Evidence["Observability & Evidence"]
+    Runtime --> Conversation["Visible Conversation Journal"]
+    Conversation --> Catena["optional Catena sync"]
     Evidence --> Test["Test"]
     Evidence --> Eval["shared Eval"]
     Roles --> Arena["Arena"]
@@ -51,8 +56,8 @@ flowchart LR
 | M0 Documentation baseline | Completed | 固定 14 份 SPEC/PLAN |
 | M1 Shared runtime | Completed | AgentSession、ConversationRunner、ToolManager 与 providers |
 | M2 Base + eight roles | Completed | 一个 Base、八个默认 Role、零个 Base Skill |
-| M3 Surface integration | Partial | 入口共享 Runtime；网络权限与 Owner identity 未完整 |
-| M4 Evidence system | Partial | Trace/artifact/delivery 可用；durable recovery 未完整 |
+| M3 Surface integration | Partial | 入口共享 Runtime 和 Conversation Journal；网络权限与 Owner identity 未完整 |
+| M4 Evidence system | Partial | Trace/artifact/delivery/visible Conversation 可用；durable recovery 未完整 |
 | M5 Test / Eval split | Completed | Scripted Runtime Test 已移出 Eval 公共语义与物理目录 |
 | M6 Shared Evaluation core | Completed | CaseSet CLI、Case Replay、Verifier veto、Reviewer Judge、Outcome |
 | M7 Lightweight Arena core | Completed | Scenario CLI → UserCat → standard Trace → Inspector → Case → Eval |
@@ -102,6 +107,10 @@ flowchart LR
 
 ## Recent Verification
 
+- XiaoBaOS Conversation slice passes `npm test` 575/575 across 104 suites and
+  `npm run build`; focused coverage passes 52/52. A real local Journal → Catena
+  PostgreSQL → React round trip displayed an ordered user/assistant exchange,
+  file delivery, Role name, and shared Trace ID.
 - `npm run build` passed。
 - `npm test` passed 561/561 across 102 suites。
 - EngineerCat 相关 focused tests passed 31/31 across 5 suites；真实官方 SDK read-only start/resume smoke 返回固定标记，两轮均为 zero changes / zero external tools。

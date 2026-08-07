@@ -17,6 +17,13 @@ import {
 import { Logger } from '../utils/logger';
 import { RoleResolver } from '../utils/role-resolver';
 import { PetChatHistoryStore } from './chat-history-store';
+import {
+  ConversationTurnContext,
+  journalVisibleChannel,
+  recordVisibleAssistant,
+  recordVisibleInbound,
+  reserveConversationTraceId,
+} from '../utils/conversation-surface';
 
 type PetState =
   | 'idle'
@@ -321,6 +328,8 @@ export class PetChannel {
   private async handleMessage(body: any, res: Response): Promise<void> {
     const stream = new PetEventStream(res);
     let session: AgentSession | undefined;
+    let journalTurn: ConversationTurnContext | undefined;
+    let streamedVisibleText = '';
 
     try {
       const normalized = normalizePetMessageSurfaceEvent(body, { defaultPetId: this.resolveDefaultPetId() });
@@ -329,14 +338,22 @@ export class PetChannel {
       const source = normalized.source || 'unknown';
       const sessionKey = normalized.sessionKey;
       const traceparent = normalized.traceparent;
+      journalTurn = this.withConversationRole(await recordVisibleInbound({
+        surface: 'pet',
+        sessionKey,
+        content: [{ type: 'text', text }],
+        sourceEventId: normalized.eventId,
+      }));
       await this.ensureSkillsReadyForSessionKey(sessionKey);
       this.assertRequiredSkillAvailable(sessionKey);
       const activeSession = this.sessionManager.getOrCreate(sessionKey, sessionKey);
       session = activeSession;
       this.registerSubAgentCallbacks(sessionKey, petId);
       stream.setFanout(event => this.events.publish(petId, sessionKey, event));
-      const channel = this.buildChannel(sessionKey, stream);
-      const callbacks = this.buildCallbacks(stream);
+      const channel = journalVisibleChannel(journalTurn, this.buildChannel(sessionKey, stream));
+      const callbacks = this.buildCallbacks(stream, chunk => {
+        streamedVisibleText += chunk;
+      });
 
       stream.open();
       activeSession.runWithLogContext(() => Logger.info(`[${sessionKey}] 收到 pet 消息 (${source}): ${text.slice(0, 120)}`));
@@ -357,6 +374,7 @@ export class PetChannel {
             channel,
             surface: 'pet',
             traceparent,
+            traceId: journalTurn?.traceId,
           });
           if (command.toLowerCase() === 'clear' && args.includes('--all')) {
             this.chatHistory.delete(sessionKey);
@@ -368,7 +386,13 @@ export class PetChannel {
             resultText = `未识别命令：/${command}`;
           }
         } else {
-          const messageResult = await activeSession.handleMessage(text, { callbacks, channel, surface: 'pet', traceparent });
+          const messageResult = await activeSession.handleMessage(text, {
+            callbacks,
+            channel,
+            surface: 'pet',
+            traceparent,
+            traceId: journalTurn?.traceId,
+          });
           resultText = messageResult.text;
           visibleToUser = messageResult.visibleToUser;
         }
@@ -376,12 +400,33 @@ export class PetChannel {
         return { resultText, visibleToUser };
       });
 
+      if (streamedVisibleText && journalTurn) {
+        await recordVisibleAssistant({
+          ...journalTurn,
+          content: [{ type: 'text', text: streamedVisibleText }],
+          deliveryKey: 'pet:visible-stream',
+        });
+      }
       if (!stream.hasText && result.resultText) {
         stream.text(result.resultText);
+        if (journalTurn) {
+          await recordVisibleAssistant({
+            ...journalTurn,
+            content: [{ type: 'text', text: result.resultText }],
+            deliveryKey: 'pet:direct',
+          });
+        }
       }
       stream.state('waving', 'done');
       stream.done(result.resultText, result.visibleToUser);
     } catch (err: any) {
+      if (streamedVisibleText && journalTurn) {
+        await recordVisibleAssistant({
+          ...journalTurn,
+          content: [{ type: 'text', text: streamedVisibleText }],
+          deliveryKey: 'pet:visible-stream',
+        });
+      }
       const logError = () => Logger.error(`[pet] 消息处理失败: ${err.message}`);
       if (session) {
         session.runWithLogContext(logError);
@@ -441,10 +486,29 @@ export class PetChannel {
   private async handleSubAgentFeedback(sessionKey: string, petId: string, text: string): Promise<void> {
     await this.enqueueMessage(sessionKey, async () => {
       const session = this.sessionManager.getOrCreate(sessionKey, sessionKey);
-      const callbacks = this.buildBackgroundCallbacks(sessionKey, petId);
-      const channel = this.buildBackgroundChannel(sessionKey, petId);
+      const turn = this.createConversationTurn(sessionKey);
+      let streamedVisibleText = '';
+      const callbacks = this.buildBackgroundCallbacks(sessionKey, petId, chunk => {
+        streamedVisibleText += chunk;
+      });
+      const channel = journalVisibleChannel(turn, this.buildBackgroundChannel(sessionKey, petId));
       session.runWithLogContext(() => Logger.info(`[${sessionKey}] 收到子智能体反馈: ${text.slice(0, 120)}`));
-      await session.handleMessage(text, { callbacks, channel, surface: 'pet' });
+      try {
+        await session.handleMessage(text, {
+          callbacks,
+          channel,
+          surface: 'pet',
+          traceId: turn.traceId,
+        });
+      } finally {
+        if (streamedVisibleText) {
+          await recordVisibleAssistant({
+            ...turn,
+            content: [{ type: 'text', text: streamedVisibleText }],
+            deliveryKey: 'pet:visible-stream',
+          });
+        }
+      }
     });
   }
 
@@ -459,11 +523,12 @@ export class PetChannel {
     }
   }
 
-  private buildCallbacks(stream: PetEventStream): SessionCallbacks {
+  private buildCallbacks(stream: PetEventStream, onVisibleText?: (text: string) => void): SessionCallbacks {
     return {
       onText: (text: string) => {
         stream.state('review', 'text_stream');
         stream.text(text);
+        onVisibleText?.(text);
       },
       onThinking: (thinking: string) => {
         stream.state('review', 'thinking');
@@ -487,11 +552,16 @@ export class PetChannel {
     };
   }
 
-  private buildBackgroundCallbacks(sessionKey: string, petId: string): SessionCallbacks {
+  private buildBackgroundCallbacks(
+    sessionKey: string,
+    petId: string,
+    onVisibleText?: (text: string) => void,
+  ): SessionCallbacks {
     return {
       onText: (text: string) => {
         this.events.publish(petId, sessionKey, { type: 'state', state: 'review', reason: 'subagent_text_stream' });
         this.events.publish(petId, sessionKey, { type: 'text', text });
+        onVisibleText?.(text);
       },
       onThinking: (thinking: string) => {
         this.events.publish(petId, sessionKey, { type: 'state', state: 'review', reason: 'subagent_thinking' });
@@ -574,6 +644,22 @@ export class PetChannel {
           },
         ];
       },
+    };
+  }
+
+  private createConversationTurn(sessionKey: string, traceId?: string): ConversationTurnContext {
+    return this.withConversationRole({
+      surface: 'pet',
+      sessionKey,
+      traceId: traceId || reserveConversationTraceId('pet', sessionKey),
+    });
+  }
+
+  private withConversationRole(turn: ConversationTurnContext): ConversationTurnContext {
+    const roleName = this.resolveServicesForSessionKey(turn.sessionKey).roleName;
+    return {
+      ...turn,
+      ...(roleName ? { roleName } : {}),
     };
   }
 

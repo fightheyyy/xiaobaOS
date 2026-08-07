@@ -12,6 +12,13 @@
     review: { row: 8, durations: [150, 150, 150, 150, 150, 280], label: 'review' },
   };
 
+  function createPetEventId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+      return window.crypto.randomUUID();
+    }
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+  }
+
   class SpritePlayer {
     constructor(canvas, options = {}) {
       this.canvas = canvas;
@@ -109,7 +116,13 @@
       const response = await fetch(this.api + '/api/pet/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ petId, text, source: options.source || 'unknown', sessionKey: options.sessionKey }),
+        body: JSON.stringify({
+          petId,
+          text,
+          source: options.source || 'unknown',
+          sessionKey: options.sessionKey,
+          eventId: options.eventId || createPetEventId(),
+        }),
       });
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => ({}));

@@ -138,6 +138,24 @@ describe('AgentSession session log alignment', () => {
     assert.strictEqual(turn.assistant.text, 'done');
   });
 
+  test('surface-reserved trace id is reused by durable session evidence', async () => {
+    const session = new AgentSession('pet:conversation-trace', {
+      aiService: new ScriptedAIService({ content: 'done' }) as any,
+      toolManager: new ToolManager(),
+      skillManager: new EmptySkillManager() as any,
+    }, 'pet');
+
+    await session.handleMessage('trace me', {
+      surface: 'pet',
+      traceId: 'trace_conversation_contract_1',
+    });
+
+    const trace = readSessionEntries(testRoot, 'pet').find(isTraceEntry);
+    assert.ok(trace);
+    assert.strictEqual(trace.trace_id, 'trace_conversation_contract_1');
+    assert.strictEqual(trace.episode_id, 'trace_conversation_contract_1');
+  });
+
   test('pre-message compaction records a trace event and compact-after snapshot', async () => {
     const aiService = new ScriptedAIService({ content: 'done' });
     const session = new AgentSession('pet:compact-pre-message', {

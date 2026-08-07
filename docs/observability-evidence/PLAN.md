@@ -1,7 +1,7 @@
 # Observability & Evidence PLAN
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-08-06
 Owner：Runtime / evidence maintainers
 
 ## Current Status
@@ -16,6 +16,10 @@ Owner：Runtime / evidence maintainers
 - The digest is built once by runtime and handed to InspectorCat as the first model stage; Observability still owns neither diagnosis nor routing.
 - The shared session/model/tool span topology can be projected through a default-off OTLP/HTTP protobuf exporter; external strings are allowlisted, lifecycle shutdown flushes pending batches and collector failure is fail-open.
 - Retention, encryption, durable in-flight state and user-controlled deletion remain incomplete.
+- The XiaoBaOS-only Conversation Journal is implemented for CLI, Feishu,
+  Weixin, and Pet. It records only user-visible input and successfully delivered
+  text/file output, then optionally projects new rows to Catena without changing
+  local delivery outcomes.
 
 ```mermaid
 flowchart LR
@@ -25,6 +29,8 @@ flowchart LR
     Projection --> Debug["Dashboard / maintainer debug"]
     Projection --> OTLP["optional redacted OTLP traces"]
     OTLP --> Collector["Barena / LangWatch / OTel Collector"]
+    Runtime --> Conversation["user-visible Conversation Journal"]
+    Conversation --> Catena["optional Catena HTTPS JSON"]
 ```
 
 ## Milestones
@@ -38,6 +44,7 @@ flowchart LR
 7. Durable in-flight task/action evidence：partial/not started。
 8. Read-only nightly evolution digest over terminal traces：completed。
 9. Optional OTLP/HTTP trace exporter：completed for session/model/tool spans；default-off、redacted、fail-open，local JSONL remains authoritative。
+10. XiaoBaOS Conversation Journal + Catena HTTPS export：completed for CLI、Feishu、Weixin、Pet current-message paths。
 
 ## Next Steps
 
@@ -46,6 +53,9 @@ flowchart LR
 - Add durable parent/child/action receipts needed for crash recovery.
 - Keep raw provider payload and full pre-compaction snapshots opt-in rather than default.
 - Keep Case creation and long-lived CaseSet admission outside Observability.
+- Keep Conversation local-first and fail-open. Add historical backfill or a
+  durable upload cursor only when a real offline-sync requirement exists; never
+  reconstruct authoritative user-visible history from Trace spans.
 
 ## Owners
 
@@ -72,6 +82,14 @@ flowchart LR
 
 ## Recent Verification
 
+- `npm run build` and `npm test` 575/575 across 104 suites pass after the
+  Conversation slice. Focused Journal/surface/CLI/Feishu/Weixin/Pet coverage
+  passes 52/52, including concurrent sequence allocation, idempotency,
+  successful-delivery filtering, invalid content, bounded export timeout, and
+  Trace correlation.
+- A real `ConversationJournal` wrote two ordered Pet rows locally and exported
+  them through a personal API token to Catena; Catena rendered the user text,
+  assistant text, file, Role, and shared 32-hex Trace ID.
 - OTel focused tests cover parent/child ids, incoming W3C ancestry, resource identity, string allowlist privacy, real loopback OTLP/HTTP protobuf delivery, header decoding, invalid endpoints and unavailable-collector fail-open behavior.
 - Full repository tests pass 556/556 across 100 suites；`npm run build` passes.
 - Deterministic harvest tests cover timestamp windows across date directories, malformed/non-terminal rows, test/replay/self-run exclusion, runtime-stamped custom replay provenance, stable observation ids and atomic reruns.

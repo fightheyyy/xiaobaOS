@@ -11,6 +11,12 @@ import { AgentSession, AgentServices, SessionCallbacks } from '../core/agent-ses
 import { RoleResolver } from '../utils/role-resolver';
 import { SubAgentManager } from '../core/sub-agent-manager';
 import { shutdownObservability } from '../observability';
+import {
+  ConversationTurnContext,
+  recordVisibleAssistant,
+  recordVisibleInbound,
+  reserveConversationTraceId,
+} from '../utils/conversation-surface';
 
 const DEFAULT_CLI_ONE_SHOT_SUBAGENT_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_CLI_ONE_SHOT_POLL_INTERVAL_MS = 25;
@@ -98,7 +104,10 @@ export async function chatCommand(options: CommandOptions): Promise<void> {
       SubAgentManager.getInstance().listByParent(session.key).map(item => item.id),
     );
     try {
-      await sendSingleMessage(session, options.message);
+      await sendSingleMessage(session, options.message, {
+        recordInbound: true,
+        roleName,
+      });
       await settleCliOneShotSubAgents(session, subAgentFeedback, existingSubAgentIds);
     } finally {
       cleanupCliOneShotSubAgents(session.key, subAgentFeedback, existingSubAgentIds);
@@ -113,7 +122,7 @@ export async function chatCommand(options: CommandOptions): Promise<void> {
   }
 
   // 交互式对话模式（默认）
-  await interactiveChat(session, restoreLoggerMode, subAgentFeedback);
+  await interactiveChat(session, restoreLoggerMode, subAgentFeedback, roleName);
 }
 
 export function registerCliSubAgentCallbacks(
@@ -305,14 +314,31 @@ function createStreamingCallbacks(spinner: ora.Ora): { callbacks: SessionCallbac
   return { callbacks, didStream: () => streamed };
 }
 
-async function sendSingleMessage(
+export async function sendSingleMessage(
   session: AgentSession,
   message: string,
+  options: { recordInbound?: boolean; roleName?: string; traceId?: string } = {},
 ): Promise<void> {
+  const turn = options.recordInbound === true
+    ? await recordVisibleInbound({
+      surface: 'cli',
+      sessionKey: session.key,
+      content: [{ type: 'text', text: message }],
+      traceId: options.traceId,
+    })
+    : {
+      surface: 'cli' as const,
+      sessionKey: session.key,
+      traceId: options.traceId || reserveConversationTraceId('cli', session.key),
+    };
   const spinner = ora(styles.text('思考中...')).start();
 
   const { callbacks, didStream } = createStreamingCallbacks(spinner);
-  const result = await session.handleMessage(message, callbacks);
+  const result = await session.handleMessage(message, {
+    callbacks,
+    surface: 'cli',
+    traceId: turn.traceId,
+  });
 
   spinner.stop();
   if (didStream()) {
@@ -321,12 +347,14 @@ async function sendSingleMessage(
     // 没有流式输出（如错误信息），直接打印返回值
     console.log('\n' + result.text + '\n');
   }
+  await recordCliReply(turn, result.text, options.roleName, 'cli:direct');
 }
 
 async function interactiveChat(
   session: AgentSession,
   restoreLoggerMode: () => void,
   subAgentFeedback: CliSubAgentFeedbackHandle,
+  roleName?: string,
 ): Promise<void> {
   // 保存原始的 process.exit 函数
   const originalExit = process.exit.bind(process);
@@ -403,6 +431,12 @@ async function interactiveChat(
       return;
     }
 
+    const turn = await recordVisibleInbound({
+      surface: 'cli',
+      sessionKey: session.key,
+      content: [{ type: 'text', text: message }],
+    });
+
     // 处理斜杠命令
     if (message.startsWith('/')) {
       const parts = message.slice(1).split(/\s+/);
@@ -412,9 +446,13 @@ async function interactiveChat(
 
       // /exit：直接退出，不走 gracefulExit 避免双重告别
       if (cmdName === 'exit') {
-        const result = await session.handleCommand(command, args);
+        const result = await session.handleCommand(command, args, {
+          surface: 'cli',
+          traceId: turn.traceId,
+        });
         if (result.reply) {
           console.log('\n' + styles.text(result.reply) + '\n');
+          await recordCliReply(turn, result.reply, roleName, 'cli:command');
         }
         isExiting = true;
         rl.close();
@@ -428,9 +466,13 @@ async function interactiveChat(
 
       // 简单内置命令：不需要 spinner
       if (['clear', 'skills', 'history'].includes(cmdName)) {
-        const result = await session.handleCommand(command, args);
+        const result = await session.handleCommand(command, args, {
+          surface: 'cli',
+          traceId: turn.traceId,
+        });
         if (result.handled && result.reply) {
           console.log('\n' + result.reply);
+          await recordCliReply(turn, result.reply, roleName, 'cli:command');
         }
         promptForNextInput();
         return;
@@ -440,7 +482,11 @@ async function interactiveChat(
       const spinner = ora({ text: styles.text('思考中...'), color: 'yellow', discardStdin: false }).start();
       const { callbacks, didStream } = createStreamingCallbacks(spinner);
 
-      const result = await session.handleCommand(command, args, callbacks);
+      const result = await session.handleCommand(command, args, {
+        callbacks,
+        surface: 'cli',
+        traceId: turn.traceId,
+      });
       spinner.stop();
 
       if (result.handled) {
@@ -448,6 +494,9 @@ async function interactiveChat(
           process.stdout.write('\n\n');
         } else if (result.reply) {
           console.log('\n' + result.reply);
+        }
+        if (result.reply) {
+          await recordCliReply(turn, result.reply, roleName, 'cli:command');
         }
         promptForNextInput();
         return;
@@ -460,6 +509,7 @@ async function interactiveChat(
       subAgentFeedback.dispose();
       await stopCommandSupport();
       console.log('\n' + styles.text('再见！期待下次与你对话。') + '\n');
+      await recordCliReply(turn, '再见！期待下次与你对话。', roleName, 'cli:exit');
       isExiting = true;
       rl.close();
       Logger.info('再见！期待下次与你对话。');
@@ -473,7 +523,11 @@ async function interactiveChat(
     const spinner = ora({ text: styles.text('思考中...'), color: 'yellow', discardStdin: false }).start();
     const { callbacks, didStream } = createStreamingCallbacks(spinner);
 
-    const result = await session.handleMessage(message, callbacks);
+    const result = await session.handleMessage(message, {
+      callbacks,
+      surface: 'cli',
+      traceId: turn.traceId,
+    });
 
     spinner.stop();
     if (didStream()) {
@@ -481,6 +535,7 @@ async function interactiveChat(
     } else {
       console.log('\n' + result.text + '\n');
     }
+    await recordCliReply(turn, result.text, roleName, 'cli:direct');
 
     promptForNextInput();
   });
@@ -501,4 +556,19 @@ async function interactiveChat(
   // 显示第一个提示符
   promptForNextInput();
   await new Promise<void>(() => undefined);
+}
+
+async function recordCliReply(
+  turn: ConversationTurnContext,
+  text: string | undefined,
+  roleName: string | undefined,
+  deliveryKey: string,
+): Promise<void> {
+  if (!text) return;
+  await recordVisibleAssistant({
+    ...turn,
+    roleName,
+    content: [{ type: 'text', text }],
+    deliveryKey,
+  });
 }

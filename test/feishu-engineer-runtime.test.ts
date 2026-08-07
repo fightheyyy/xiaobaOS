@@ -1,18 +1,21 @@
 import { afterEach, describe, test } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { MessageSessionManager } from '../src/core/message-session-manager';
 import { createRoleAwareToolManager } from '../src/bootstrap/tool-manager';
-import { FeishuBot } from '../src/feishu';
+import { buildFeishuVisibleInboundContent, FeishuBot } from '../src/feishu';
 import { RoleResolver } from '../src/utils/role-resolver';
 import { Message, ChatResponse } from '../src/types';
 import { ToolDefinition } from '../src/types/tool';
 import { Skill } from '../src/types/skill';
+import { resetConversationJournalForTests } from '../src/utils/conversation-journal';
 
 const originalRole = process.env.XIAOBA_ROLE;
 const originalCurrentRole = process.env.CURRENT_ROLE;
 const originalCurrentRoleDisplayName = process.env.CURRENT_ROLE_DISPLAY_NAME;
+const conversationRoots: string[] = [];
 
 class ScriptedFeishuAIService {
   requests: Array<{ messages: Message[]; tools: ToolDefinition[] }> = [];
@@ -147,6 +150,10 @@ function feishuTextEvent(
 
 describe('Feishu Engineer runtime', () => {
   afterEach(() => {
+    resetConversationJournalForTests({ env: { NODE_ENV: 'test' } });
+    for (const root of conversationRoots.splice(0)) {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
     if (originalRole) {
       process.env.XIAOBA_ROLE = originalRole;
     } else {
@@ -223,7 +230,26 @@ describe('Feishu Engineer runtime', () => {
     }
   });
 
+  test('Feishu visible file inbound preserves both its label and file part', () => {
+    assert.deepStrictEqual(
+      buildFeishuVisibleInboundContent('[文件] release-notes.md', 'release-notes.md'),
+      [
+        { type: 'text', text: '[文件] release-notes.md' },
+        { type: 'file', name: 'release-notes.md' },
+      ],
+    );
+  });
+
   test('Feishu slash skill commands preserve channel delivery context for send_text', async () => {
+    const journalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoba-feishu-conversation-'));
+    conversationRoots.push(journalRoot);
+    const journal = resetConversationJournalForTests({
+      workingDirectory: journalRoot,
+      env: {
+        NODE_ENV: 'test',
+        XIAOBA_CONVERSATION_RECORDING_ENABLED: 'true',
+      },
+    });
     const skill: Skill = {
       metadata: {
         name: 'ship',
@@ -268,6 +294,15 @@ describe('Feishu Engineer runtime', () => {
           text: 'Feishu skill update delivered through send_text.',
         },
       ]);
+      const rows = fs.readFileSync(journal.filePathFor('feishu', 'user:ou_engineer_tester'), 'utf8')
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      assert.deepStrictEqual(rows.map(row => row.role), ['user', 'assistant']);
+      assert.deepStrictEqual(rows[0].content, [{ type: 'text', text: '/ship release notes' }]);
+      assert.deepStrictEqual(rows[1].content, [{ type: 'text', text: 'Feishu skill update delivered through send_text.' }]);
+      assert.strictEqual(rows[0].trace_id, rows[1].trace_id);
+      assert.ok(!JSON.stringify(rows).includes('This final text should stay internal.'));
     } finally {
       await bot.destroy();
     }

@@ -196,6 +196,7 @@ xiaoba arena evaluate --role engineer-cat --scenario "帮我修好这个项目"
 | 证据层 | 作用 |
 | --- | --- |
 | Trace | 保存一次请求中的模型、工具、失败、交付和 runtime event |
+| Conversation Journal | 保存用户输入与实际成功交付的文本/文件；不包含 thinking、system prompt 或工具内部数据 |
 | Artifact / Delivery Evidence | 记录文件、消息、外部回执和实际交付结果 |
 | Replay | 执行 Case，重新驱动当前 Agent，并产生 fresh Trace；本身不裁决 |
 | Eval | Verifier 做硬检查，ReviewerCat 做语义判断，产生唯一 Outcome |
@@ -216,6 +217,16 @@ XiaoBa 可以把同一组 session / model / tool span 通过 OTLP/HTTP protobuf 
 ```bash
 XIAOBA_OBSERVABILITY_ENABLED=true \
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 \
+xiaoba chat
+```
+
+用户实际可见的对话另存为本地 append-only Journal：`data/conversations/<surface>/<conversation-hash>.jsonl`。它与 provider transcript、Trace 和 Pet SSE history 相互独立；本地记录在非测试运行时默认开启，可显式关闭。只有同时配置 Catena 地址和 API key 时才会 best-effort 导出，网络失败不会改变消息处理或交付结果。
+
+```bash
+XIAOBA_CONVERSATION_RECORDING_ENABLED=true \
+CATENA_BASE_URL=https://catena.example.com \
+CATENA_API_KEY=barena_pat_your_api_key \
+XIAOBA_CONVERSATION_AGENT_ID=my_xiaoba_agent \
 xiaoba chat
 ```
 

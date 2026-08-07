@@ -8,7 +8,7 @@ const DEFAULT_SESSION_TTL = 60 * 60 * 1000;
  * 统一唤醒回复函数签名
  * 平台层注入具体的发送实现
  */
-export type WakeupSendFn = (channelId: string, text: string) => Promise<void>;
+export type WakeupSendFn = (channelId: string, text: string, sessionKey: string) => Promise<void>;
 export type AgentServicesResolver = (sessionKey: string) => AgentServices;
 
 /**
@@ -100,7 +100,7 @@ export class MessageSessionManager {
         session.runWithLogContext(() => Logger.warning(`[${key}] 主动唤醒失败: 无 channelId`));
         return;
       }
-      await sendFn(channelId, text);
+      await sendFn(channelId, text, key);
     });
   }
 

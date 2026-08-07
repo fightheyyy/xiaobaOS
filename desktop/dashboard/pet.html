@@ -392,7 +392,15 @@
         const response = await fetch('/api/pet/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ petId: selectedPetId, text, source: 'pet-page', sessionKey: selectedSessionKey })
+          body: JSON.stringify({
+            petId: selectedPetId,
+            text,
+            source: 'pet-page',
+            sessionKey: selectedSessionKey,
+            eventId: (window.crypto && typeof window.crypto.randomUUID === 'function')
+              ? window.crypto.randomUUID()
+              : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2)
+          })
         });
         if (!response.ok || !response.body) throw new Error('请求失败');
         await readEvents(response.body);

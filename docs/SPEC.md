@@ -35,6 +35,7 @@ Harness is the runtime.
 核心运行术语：
 
 - `session`：一个长期会话，可跨多次用户请求和进程重启恢复。
+- `conversation`：一个 surface 上用户实际可见的长期消息流；只包含用户输入、成功交付的 Agent 文本/文件和显式可见的 Runtime 回复，不等同于 provider transcript 或 trace。
 - `trace`：一次用户请求从进入 runtime 到本次 `ConversationRunner` while loop 截止的闭环，是产品、观测、eval 和 benchmark 的最小用户意图单元。
 - `turn`：`ConversationRunner` 内部 while loop 的一次 model request / tool result 推进一步。`turn` 不再指完整用户请求。
 - `span`：trace 内可计时的子操作，例如 model、tool、provider、delivery。
@@ -118,6 +119,8 @@ flowchart LR
     Runtime --> EngineerAdapter["EngineerCat Codex adapter<br/>optional external executor"]
     EngineerAdapter --> Codex["local Codex thread"]
     Runtime --> Trace["Trace<br/>shared runtime evidence"]
+    Runtime --> Conversation["Conversation Journal<br/>user-visible messages only"]
+    Conversation --> Catena["Catena conversation ingest<br/>optional + fail-open"]
 
     Test["Test<br/>implementation correctness"] --> TestResult["TestResult"]
     Case["Case + Oracle"] --> Eval["Eval<br/>Replay + Judge"]
@@ -189,19 +192,21 @@ user message -> prepare context -> provider request -> assistant decision
 - outbound tools 例如 `send_text` / `send_file` 的成功必须进入 structured delivery evidence，并能被 `delivery_evidence_contract` 验证；channel-backed tools 和 surface runtime replay 还可以记录 `external_delivery_receipts`，用于保存平台 message/file/upload ack 的结构化事实。
 - 已经对用户可见的消息不能因为后续 provider 失败而被 runtime 当作未发生。
 
-## 三层状态模型
+## 四层状态模型
 
-XiaoBa 的状态不能只用一个 `messages[]` 描述。需要区分三层：
+XiaoBa 的状态不能只用一个 `messages[]` 描述。需要区分四层：
 
 | 层 | 内容 | 作用 |
 | --- | --- | --- |
 | Durable Session | surface、session key、`data/sessions/<surface>` 持久化上下文、active skill、按需读取的长期 memory 笔记 | 跨 trace / restart 恢复 |
+| Conversation Journal | 用户输入、成功交付的 `send_text` / `send_file`、CLI direct reply 和显式可见 Runtime 回复 | 用户历史、Prompt/Memory/Role 进化；append-only，不参与 provider restore |
 | Trace | 当前用户请求的 user input、runner turns、tool calls、tool results、artifacts、runtime events | debug、Replay、Test/Eval 证据 |
 | Provider Transcript | 真正发送给模型 provider 的 system/user/assistant/tool messages | 保证 provider 协议合法和 token budget |
 
 设计原则：
 
 - Durable session 不能直接等同于 provider transcript。
+- Conversation Journal 不能从 provider transcript 反推；未交付的 final text、system/developer prompt、thinking 和 tool internals 不得进入用户可见历史。
 - Trace 是事实证据，不一定全部进入下一次 provider request。
 - Context compression 应该迁移状态，而不是简单裁剪文本。
 - Session log 是 Replay/Eval 的输入资产；新写入应带 `trace_id` / `trace_index`，而 `case_id` 与 Outcome 属于后处理或评测产物。
@@ -213,6 +218,12 @@ XiaoBa 的状态不能只用一个 `messages[]` 描述。需要区分三层：
 `memory/sessions/<session-key-hash>/MEMORY.md` 是按 session/person 维度维护的长期记忆笔记：只保存稳定偏好、习惯、称呼、默认工作方式和用户明确要求记住的事实。它是 Markdown 主存储，便于人类阅读、diff、编辑和删除。
 
 长期 memory 不默认加载进 provider prompt。恢复会话时只恢复对应 surface 下的 `data/sessions`；长期 memory 只能通过显式 recall、后续工具或用户请求按需注入，并且注入内容必须小而相关。当前任务进度、刚失败的命令、下一步待办和临时文件路径属于 `data/sessions` / `[session_memory]`，不能自动固化为长期 memory。
+
+## Conversation Contract
+
+`data/conversations/<surface>/<conversation-hash>.jsonl` 是 XiaoBaOS 专属的 append-only 用户可见历史。每行使用 `xiaoba.conversation_message.v1`，至少包含稳定 `message_id`、`conversation_id`、单调 `sequence`、`occurred_at`、`surface`、`agent_id`、`role`、可见 `content[]`、delivery 状态和可选 `trace_id`。
+
+Conversation 明确排除 system/developer prompt、thinking/reasoning、未交付的模型 final text、tool args/result、Judge 和内部 subagent 消息。Catena 同步使用 `xiaoba.conversation_batch.v1` 通过普通 HTTPS JSON + API key 幂等导入；它不是 OTLP 信号，上传失败不得改变本地消息交付或删除本地 Journal。
 
 ## Message-Native Runtime
 

@@ -12,6 +12,7 @@ import { SkillManager } from '../src/skills/skill-manager';
 import type { ChatResponse, Message } from '../src/types';
 import type { ToolDefinition } from '../src/types/tool';
 import { RoleResolver } from '../src/utils/role-resolver';
+import { resetConversationJournalForTests } from '../src/utils/conversation-journal';
 
 const originalCwd = process.cwd();
 const originalPetsDir = process.env.XIAOBA_PETS_DIR;
@@ -310,6 +311,7 @@ describe('PetChannel', () => {
       await channel.destroy();
       channel = null;
     }
+    resetConversationJournalForTests({ env: { NODE_ENV: 'test' } });
     process.chdir(originalCwd);
     if (testRoot && fs.existsSync(testRoot)) {
       fs.rmSync(testRoot, { recursive: true, force: true });
@@ -459,6 +461,44 @@ describe('PetChannel', () => {
 
     const runtimeLog = readPetRuntimeLog(testRoot);
     assert.match(runtimeLog, /\[pet session=pet_alpha-puff\].*收到 pet 消息 \(unknown\): \/history/);
+  });
+
+  test('Pet Journal records one inbound and one direct visible reply without done duplication', async () => {
+    const journal = resetConversationJournalForTests({
+      workingDirectory: testRoot,
+      env: {
+        NODE_ENV: 'test',
+        XIAOBA_CONVERSATION_RECORDING_ENABLED: 'true',
+      },
+    });
+    const request = () => fetch(`${baseUrl}/api/pet/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        petId: 'alpha-puff',
+        text: '/history',
+        source: 'dashboard',
+        eventId: 'pet_event_1',
+      }),
+    });
+
+    const first = await request();
+    assert.strictEqual(first.status, 200);
+    await readSse(first);
+
+    const filePath = journal.filePathFor('pet', 'pet:alpha-puff');
+    const firstRows = fs.readFileSync(filePath, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.deepStrictEqual(firstRows.map(row => row.role), ['user', 'assistant']);
+    assert.deepStrictEqual(firstRows.map(row => row.sequence), [1, 2]);
+    assert.deepStrictEqual(firstRows[0].content, [{ type: 'text', text: '/history' }]);
+    assert.match(firstRows[1].content[0].text, /对话历史信息/);
+    assert.strictEqual(firstRows[0].trace_id, firstRows[1].trace_id);
+
+    const retry = await request();
+    assert.strictEqual(retry.status, 200);
+    await readSse(retry);
+    const retryRows = fs.readFileSync(filePath, 'utf8').trim().split('\n').filter(Boolean);
+    assert.strictEqual(retryRows.length, 2);
   });
 
   test('skill 斜杠命令带参数时保留 pet channel 并可用 send_text 交付', async () => {
