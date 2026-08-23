@@ -21,6 +21,8 @@ Owner：Runtime maintainers
 - EngineerCat Source Candidate runs in a secret-free source copy；build and ordinary tests run under a native sandbox, while the two sandbox-in-sandbox contract files run separately with their own native sandbox；source + dist activation is scoped to the next process.
 - XiaoBa is a product runtime with a reusable harness core, not yet a public general-purpose Harness SDK.
 - Session/model/tool spans can be exported through the default-off OTLP/HTTP bridge; graceful runtime shutdown flushes spans while collector failure remains fail-open.
+- One-shot CLI execution forwards an incoming `TRACEPARENT` into `AgentSession`, preserving
+  an external Barena turn as the parent of XiaoBa's native session/model/tool spans.
 
 ```mermaid
 flowchart LR

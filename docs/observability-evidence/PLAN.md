@@ -28,7 +28,7 @@ flowchart LR
     Logs --> Replay["Trace Replay"]
     Projection --> Debug["Dashboard / maintainer debug"]
     Projection --> OTLP["optional redacted OTLP traces"]
-    OTLP --> Collector["Barena / LangWatch / OTel Collector"]
+    OTLP --> Collector["Catena / OTel Collector"]
     Runtime --> Conversation["user-visible Conversation Journal"]
     Conversation --> Catena["optional Catena HTTPS JSON"]
 ```
@@ -45,6 +45,7 @@ flowchart LR
 8. Read-only nightly evolution digest over terminal traces：completed。
 9. Optional OTLP/HTTP trace exporter：completed for session/model/tool spans；default-off、redacted、fail-open，local JSONL remains authoritative。
 10. XiaoBaOS Conversation Journal + Catena HTTPS export：completed for CLI、Feishu、Weixin、Pet current-message paths。
+11. Barena one-shot W3C parent propagation：completed for `xiaoba chat --message` through `TRACEPARENT`。
 
 ## Next Steps
 
@@ -91,6 +92,12 @@ flowchart LR
   them through a personal API token to Catena; Catena rendered the user text,
   assistant text, file, Role, and shared 32-hex Trace ID.
 - OTel focused tests cover parent/child ids, incoming W3C ancestry, resource identity, string allowlist privacy, real loopback OTLP/HTTP protobuf delivery, header decoding, invalid endpoints and unavailable-collector fail-open behavior.
-- Full repository tests pass 556/556 across 100 suites；`npm run build` passes.
+- CLI option coverage verifies that one-shot chat forwards `TRACEPARENT` to `AgentSession`,
+  allowing Catena to join Barena Run/Turn spans with XiaoBa session/model/tool spans.
+- A real Barena run on 2026-08-12 propagated a distinct W3C parent into each XiaoBaOS
+  one-shot turn. Catena retained both `xiaoba.session` and `xiaoba.model.call` beneath the
+  corresponding `barena.turn` in Trace `77ef5a0aba8aaed1c85bfcb146d56502`.
+- Final build plus focused CLI/observability verification passed 23/23 tests.
+- Full repository tests pass 576/576 across 104 suites；`npm run build` passes.
 - Deterministic harvest tests cover timestamp windows across date directories, malformed/non-terminal rows, test/replay/self-run exclusion, runtime-stamped custom replay provenance, stable observation ids and atomic reruns.
 - Real harvest for `2026-07-13` scanned 124 trace files, excluded 44 synthetic/replay rows and correctly returned 0 production observations / 0 patterns.

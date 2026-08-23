@@ -189,6 +189,9 @@ Stable OTel configuration:
 - `OTEL_EXPORTER_OTLP_TRACES_HEADERS` overrides duplicate shared `OTEL_EXPORTER_OTLP_HEADERS` keys. Header values use standard URL encoding.
 - `OTEL_SERVICE_NAME` and standard OTLP timeout variables are accepted; `XIAOBA_OBSERVABILITY_SERVICE_NAME` remains the XiaoBa-specific service-name override.
 - `OTEL_SDK_DISABLED=true` disables the exporter even when the XiaoBa opt-in flag is set.
+- One-shot `xiaoba chat --message` accepts an incoming W3C parent from the `TRACEPARENT`
+  environment variable and forwards it into `AgentSession`. This lets a local Barena turn own
+  the XiaoBa session/model/tool subtree without changing XiaoBa's local evidence semantics.
 
 Stable generated roots:
 

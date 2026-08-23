@@ -107,6 +107,7 @@ export async function chatCommand(options: CommandOptions): Promise<void> {
       await sendSingleMessage(session, options.message, {
         recordInbound: true,
         roleName,
+        traceparent: process.env.TRACEPARENT,
       });
       await settleCliOneShotSubAgents(session, subAgentFeedback, existingSubAgentIds);
     } finally {
@@ -317,7 +318,7 @@ function createStreamingCallbacks(spinner: ora.Ora): { callbacks: SessionCallbac
 export async function sendSingleMessage(
   session: AgentSession,
   message: string,
-  options: { recordInbound?: boolean; roleName?: string; traceId?: string } = {},
+  options: { recordInbound?: boolean; roleName?: string; traceId?: string; traceparent?: string } = {},
 ): Promise<void> {
   const turn = options.recordInbound === true
     ? await recordVisibleInbound({
@@ -338,6 +339,7 @@ export async function sendSingleMessage(
     callbacks,
     surface: 'cli',
     traceId: turn.traceId,
+    traceparent: options.traceparent,
   });
 
   spinner.stop();

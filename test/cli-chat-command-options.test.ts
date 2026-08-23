@@ -125,6 +125,22 @@ describe('CLI chat command options', () => {
     }
   });
 
+  test('one-shot CLI forwards an incoming W3C traceparent to AgentSession', async () => {
+    const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    let received: string | undefined;
+    const session = {
+      key: 'cli:traceparent-contract',
+      handleMessage: async (_message: string, options: any) => {
+        received = options.traceparent;
+        return { text: 'ok', visibleToUser: true, finalResponseVisible: true };
+      },
+    };
+
+    await sendSingleMessage(session as any, 'hello', { traceparent });
+
+    assert.equal(received, traceparent);
+  });
+
   test('interactive CLI callback receives and drives sub-agent feedback', async () => {
     const sessionKey = `cli-feedback-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const rendered: string[] = [];
