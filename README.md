@@ -144,6 +144,10 @@ BrowserCat、GuiCat 和 SecretaryCat 的外部 CLI / 平台依赖见 [`requireme
 
 Base Main Agent 是唯一面向用户的沟通和调度入口。八个 Role 复用同一套 XiaoBa Agent loop；Base 不预装默认 Skills，独立 Skill 需要显式安装或挂载到 Arena。
 
+<p align="center">
+  <img src="assets/default-role-architecture.png" alt="xiaobaOS 默认角色架构：左侧 Base Main Agent，右侧八个 Role Subagents" width="100%">
+</p>
+
 | 类型 | Role | 责任 |
 | --- | --- | --- |
 | 执行 | EngineerCat | 共享 XiaoBa Agent loop 的 coding owner；实质性编码可经窄适配器委托 Codex，原生工具作为小修改和降级路径 |
