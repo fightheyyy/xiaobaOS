@@ -53,9 +53,8 @@ function writePet(root: string, id: string): void {
   fs.writeFileSync(path.join(petDir, 'pet.json'), JSON.stringify({
     id,
     displayName: id,
-    spritesheetPath: 'spritesheet.webp',
+    renderer: 'grok-cat-v1',
   }, null, 2));
-  fs.writeFileSync(path.join(petDir, 'spritesheet.webp'), Buffer.from([0x52, 0x49, 0x46, 0x46]));
 }
 
 function writeTrace(filePath: string): void {

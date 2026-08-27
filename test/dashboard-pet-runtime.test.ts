@@ -5,11 +5,132 @@ import * as path from 'path';
 import * as vm from 'vm';
 
 function loadPetRuntime(): any {
+  const dataPath = path.join(process.cwd(), 'desktop', 'dashboard', 'grokbot-data.js');
   const runtimePath = path.join(process.cwd(), 'desktop', 'dashboard', 'pet-runtime.js');
   const context: any = { window: {} };
+  vm.runInNewContext(fs.readFileSync(dataPath, 'utf-8'), context, { filename: dataPath });
   vm.runInNewContext(fs.readFileSync(runtimePath, 'utf-8'), context, { filename: runtimePath });
   return context.window.XiaoBaPetRuntime;
 }
+
+describe('Dashboard procedural XiaoBa renderer', () => {
+  test('ships the black-gold base and a distinct color for every default role', () => {
+    const runtime = loadPetRuntime();
+    const petDir = path.join(process.cwd(), 'desktop', 'dashboard', 'pets', 'xiaoba');
+    const manifest = JSON.parse(fs.readFileSync(path.join(petDir, 'pet.json'), 'utf-8'));
+    const roleKeys = [
+      'base',
+      'user-cat',
+      'inspector-cat',
+      'reviewer-cat',
+      'engineer-cat',
+      'browser-cat',
+      'gui-cat',
+      'secretary-cat',
+      'evolution-cat',
+    ];
+
+    assert.strictEqual(runtime.rendererName, 'grok-cat-v1');
+    assert.deepStrictEqual(Object.keys(runtime.defaultRoleThemes), roleKeys);
+    assert.strictEqual(runtime.defaultRoleThemes.base.body, '#17140F');
+    assert.strictEqual(runtime.defaultRoleThemes.base.eyes, '#E5B94F');
+    assert.strictEqual(runtime.defaultRoleThemes.base.outline, '#C79A3B');
+    assert.strictEqual(new Set(roleKeys.map(key => runtime.defaultRoleThemes[key].body)).size, roleKeys.length);
+    assert.strictEqual(manifest.renderer, runtime.rendererName);
+    assert.deepStrictEqual(manifest.roleThemes, JSON.parse(JSON.stringify(runtime.defaultRoleThemes)));
+    assert.strictEqual(manifest.spritesheetPath, undefined);
+    assert.strictEqual(fs.existsSync(path.join(petDir, 'spritesheet.webp')), false);
+    const bundledPetIds = fs.readdirSync(path.dirname(petDir), { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+      .sort();
+    assert.deepStrictEqual(bundledPetIds, ['xiaoba']);
+  });
+
+  test('normalizes manifest color overrides and keeps invalid colors out', () => {
+    const runtime = loadPetRuntime();
+    const theme = runtime.getRoleTheme('GUI CAT', {
+      'gui-cat': { body: '#abc', eyes: '#102030', outline: 'not-a-color' },
+    });
+
+    assert.strictEqual(theme.role, 'gui-cat');
+    assert.strictEqual(theme.body, '#AABBCC');
+    assert.strictEqual(theme.eyes, '#102030');
+    assert.strictEqual(theme.outline, null);
+  });
+
+  test('allocates deterministic non-repeating colors across the full custom-role capacity', () => {
+    const runtime = loadPetRuntime();
+    const customRoles = Array.from(
+      { length: runtime.customRolePaletteCapacity },
+      (_value, index) => `custom-role-${String(index).padStart(5, '0')}`,
+    );
+    const roleKeys = [...Object.keys(runtime.defaultRoleThemes), ...customRoles];
+    const first = runtime.buildUniqueRoleThemes(roleKeys, runtime.defaultRoleThemes);
+    const second = runtime.buildUniqueRoleThemes([...roleKeys].reverse(), runtime.defaultRoleThemes);
+    const bodies = roleKeys.map(role => first[role].body);
+
+    assert.strictEqual(new Set(bodies).size, roleKeys.length);
+    assert.strictEqual(JSON.stringify(first), JSON.stringify(second));
+    for (const role of Object.keys(runtime.defaultRoleThemes)) {
+      assert.strictEqual(first[role].body, runtime.defaultRoleThemes[role].body);
+    }
+    for (const role of customRoles) {
+      assert.notStrictEqual(first[role].body, runtime.defaultRoleThemes.base.body);
+    }
+    assert.throws(
+      () => runtime.buildUniqueRoleThemes([...customRoles, 'one-role-too-many']),
+      /custom role color palette exhausted/,
+    );
+  });
+
+  test('reassigns custom manifest colors that collide with defaults or another role', () => {
+    const runtime = loadPetRuntime();
+    const themes = runtime.buildUniqueRoleThemes(
+      ['custom-black', 'custom-first', 'custom-second'],
+      {
+        ...runtime.defaultRoleThemes,
+        'custom-black': { body: '#17140f' },
+        'custom-first': { body: '#abc' },
+        'custom-second': { body: '#AABBCC' },
+      },
+    );
+    const bodies = Object.values(themes).map((theme: any) => theme.body);
+
+    assert.strictEqual(new Set(bodies).size, bodies.length);
+    assert.notStrictEqual(themes['custom-black'].body, runtime.defaultRoleThemes.base.body);
+    assert.strictEqual(themes['custom-first'].body, '#AABBCC');
+    assert.notStrictEqual(themes['custom-second'].body, '#AABBCC');
+  });
+
+  test('keeps punctuation and Unicode role keys distinct and fails closed on canonical collisions', () => {
+    const runtime = loadPetRuntime();
+    const themes = runtime.buildUniqueRoleThemes(['role.one', 'role-one', '夜猫']);
+
+    assert.ok(themes['role.one']);
+    assert.ok(themes['role-one']);
+    assert.ok(themes['夜猫']);
+    assert.strictEqual(new Set([
+      themes['role.one'].body,
+      themes['role-one'].body,
+      themes['夜猫'].body,
+    ]).size, 3);
+    assert.throws(
+      () => runtime.buildUniqueRoleThemes(['custom role', 'custom_role']),
+      /role keys collide after normalization/,
+    );
+  });
+
+  test('bundles the complete GrokBot expression and state data', () => {
+    const dataPath = path.join(process.cwd(), 'desktop', 'dashboard', 'grokbot-data.js');
+    const context: any = { window: {} };
+    vm.runInNewContext(fs.readFileSync(dataPath, 'utf-8'), context, { filename: dataPath });
+
+    assert.strictEqual(context.window.XiaoBaGrokBotData.expressions.length, 25);
+    assert.strictEqual(Object.keys(context.window.XiaoBaGrokBotData.shapes).length, 18);
+    assert.strictEqual(Object.keys(context.window.XiaoBaGrokBotData.expressionStates).length, 39);
+  });
+});
 
 describe('Dashboard pet runtime event handling', () => {
   test('channel_reply text events are delivered as separate assistant messages', () => {
@@ -105,6 +226,55 @@ describe('Dashboard pet page wiring', () => {
     const widget = fs.readFileSync(path.join(process.cwd(), 'desktop', 'dashboard', 'pet-widget.html'), 'utf-8');
 
     assert.match(widget, /onDone: \(event, meta\) => \{\s*if \(event\.text && !meta\?\.alreadyRenderedText\) showNotice\(event\.text, 5200\);/);
+  });
+
+  test('both pet pages load the shared procedural renderer before using the manifest', () => {
+    const runtimeSource = fs.readFileSync(
+      path.join(process.cwd(), 'desktop', 'dashboard', 'pet-runtime.js'),
+      'utf-8',
+    );
+    const widget = fs.readFileSync(path.join(process.cwd(), 'desktop', 'dashboard', 'pet-widget.html'), 'utf-8');
+    const page = fs.readFileSync(path.join(process.cwd(), 'desktop', 'dashboard', 'pet.html'), 'utf-8');
+
+    for (const html of [widget, page]) {
+      assert.ok(html.indexOf('/grokbot-data.js') < html.indexOf('/pet-runtime.js'));
+      assert.doesNotMatch(html, /image-rendering:\s*pixelated/);
+    }
+    assert.doesNotMatch(runtimeSource, /SpritePlayer|spritesheet|spriteUrl|\.drawImage\(|new Image\(/);
+    assert.match(widget, /new XiaoBaPetRuntime\.PetPlayer\(sprite\)/);
+    assert.match(widget, /buildUniqueRoleThemes\(data\.roleKeys, pet\.roleThemes\)/);
+    assert.match(widget, /\}, \{ role: activeRole \}\)/);
+    assert.match(page, /new XiaoBaPetRuntime\.PetPlayer\(sprite\)/);
+    assert.match(page, /buildUniqueRoleThemes\(\s*petRoleKeys\.concat\(selectedPetRole \|\| 'base'\),\s*pet\.roleThemes/);
+    assert.match(page, /\}, \{ role: selectedPetRole \}\)/);
+    assert.doesNotMatch(page, /spriteAtlas|function drawFrame|\.drawImage\(/);
+  });
+
+  test('dashboard role avatars and brand use the shared procedural XiaoBa renderer', () => {
+    const dashboardDir = path.join(process.cwd(), 'desktop', 'dashboard');
+    const index = fs.readFileSync(path.join(dashboardDir, 'index.html'), 'utf-8');
+    const runtime = fs.readFileSync(path.join(dashboardDir, 'pet-runtime.js'), 'utf-8');
+
+    assert.ok(index.indexOf('grokbot-data.js') < index.indexOf('pet-runtime.js'));
+    assert.match(index, /data-xiaoba-role-avatar="base"/);
+    assert.match(index, /function hydrateRoleAvatars\(root = document\)/);
+    assert.match(index, /function setDashboardRoleInventory\(roleKeys\)/);
+    assert.match(index, /XiaoBaPetRuntime\.buildUniqueRoleThemes\(/);
+    assert.match(index, /setDashboardRoleInventory\(roles\.map\(role => role\.name\)\)/);
+    assert.match(index, /player\.load\(dashboardAvatarManifest, \{ role, autoplay: false \}\)/);
+    assert.match(runtime, /if \(options\.autoplay !== false\)/);
+    assert.doesNotMatch(index, /cat-icon\d*\.png|role-icons\/|roleAvatars|getRoleAvatar/);
+
+    for (const staleAsset of [
+      'cat-icon.png',
+      'cat-icon1.png',
+      'role-icons/engineer-cat.png',
+      'role-icons/inspector-cat.png',
+      'role-icons/researcher-cat.png',
+      'role-icons/reviewer-cat.png',
+    ]) {
+      assert.strictEqual(fs.existsSync(path.join(dashboardDir, staleAsset)), false, staleAsset);
+    }
   });
 
   test('skills page renders card names through the dashboard display-name helper', () => {

@@ -30,6 +30,24 @@ function writePet(root: string, id: string, displayName: string): void {
       id,
       displayName,
       description: `${displayName} test pet`,
+      renderer: 'grok-cat-v1',
+      roleThemes: {
+        base: { body: '#17140F', eyes: '#E5B94F', outline: '#C79A3B' },
+      },
+    }, null, 2),
+    'utf-8',
+  );
+}
+
+function writeLegacySpritePet(root: string, id: string, displayName: string): void {
+  const petDir = path.join(root, 'desktop', 'dashboard', 'pets', id);
+  fs.mkdirSync(petDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(petDir, 'pet.json'),
+    JSON.stringify({
+      id,
+      displayName,
+      description: `${displayName} legacy test pet`,
       spritesheetPath: 'spritesheet.webp',
     }, null, 2),
     'utf-8',
@@ -343,16 +361,33 @@ describe('PetChannel', () => {
     }
   });
 
-  test('列出项目内置 pet，并暴露 pet spritesheet URL', async () => {
+  test('列出程序化 pet manifest', async () => {
+    writeRole(testRoot, 'fresh-role', 'alpha-puff');
     const response = await fetch(`${baseUrl}/api/pet/pets`);
     assert.strictEqual(response.status, 200);
-    const data = await response.json() as { pets: Array<{ id: string; displayName: string; spriteUrl: string; source: string }> };
+    const data = await response.json() as {
+      pets: Array<{ id: string; displayName: string; renderer: string; source: string }>;
+      roleKeys: string[];
+    };
 
     const pet = data.pets.find(item => item.id === 'alpha-puff');
     assert.ok(pet);
     assert.strictEqual(pet!.displayName, 'Alpha Puff');
-    assert.strictEqual(pet!.spriteUrl, '/api/pet/pets/alpha-puff/spritesheet');
+    assert.strictEqual(pet!.renderer, 'grok-cat-v1');
     assert.strictEqual(pet!.source, 'bundled');
+    assert.deepStrictEqual(data.roleKeys, ['base', 'fresh-role']);
+  });
+
+  test('忽略旧 spritesheet manifest 且不暴露资源端点', async () => {
+    writeLegacySpritePet(testRoot, 'legacy-cat', 'Legacy Cat');
+
+    const response = await fetch(`${baseUrl}/api/pet/pets`);
+    assert.strictEqual(response.status, 200);
+    const data = await response.json() as { pets: Array<{ id: string }> };
+    assert.strictEqual(data.pets.some(item => item.id === 'legacy-cat'), false);
+
+    const spriteResponse = await fetch(`${baseUrl}/api/pet/pets/alpha-puff/spritesheet`);
+    assert.strictEqual(spriteResponse.status, 404);
   });
 
   test('默认 pet 会跟随 active role 的 petId 配置', async () => {
@@ -379,16 +414,6 @@ describe('PetChannel', () => {
     assert.strictEqual(wakeData.sessionKey, 'pet:role-puff');
   });
 
-  test('spritesheet endpoint 只允许解析到 pet 目录内的资源', async () => {
-    const ok = await fetch(`${baseUrl}/api/pet/pets/alpha-puff/spritesheet`);
-    assert.strictEqual(ok.status, 200);
-    assert.strictEqual(ok.headers.get('content-type'), 'image/webp');
-    assert.strictEqual(await ok.arrayBuffer().then(buf => buf.byteLength), 4);
-
-    const bad = await fetch(`${baseUrl}/api/pet/pets/..%2Fsecret/spritesheet`);
-    assert.strictEqual(bad.status, 404);
-  });
-
   test('Electron cwd 切到 userData 时仍从 XIAOBA_APP_ROOT 读取内置 pet', async () => {
     await closeServer(server);
     server = null;
@@ -413,12 +438,12 @@ describe('PetChannel', () => {
 
     const petsResponse = await fetch(`${baseUrl}/api/pet/pets`);
     assert.strictEqual(petsResponse.status, 200);
-    const petsData = await petsResponse.json() as { pets: Array<{ id: string; source: string }> };
-    assert.ok(petsData.pets.some(pet => pet.id === 'electron-puff' && pet.source === 'bundled'));
-
-    const spriteResponse = await fetch(`${baseUrl}/api/pet/pets/electron-puff/spritesheet`);
-    assert.strictEqual(spriteResponse.status, 200);
-    assert.strictEqual(await spriteResponse.arrayBuffer().then(buf => buf.byteLength), 4);
+    const petsData = await petsResponse.json() as {
+      pets: Array<{ id: string; renderer: string; source: string }>;
+    };
+    assert.ok(petsData.pets.some(pet => pet.id === 'electron-puff'
+      && pet.renderer === 'grok-cat-v1'
+      && pet.source === 'bundled'));
 
     process.chdir(testRoot);
     fs.rmSync(appRoot, { recursive: true, force: true });

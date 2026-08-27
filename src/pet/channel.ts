@@ -40,9 +40,15 @@ interface PetManifest {
   id: string;
   displayName?: string;
   description?: string;
-  spriteVersionNumber?: number;
-  spritesheetPath?: string;
+  renderer?: string;
+  roleThemes?: Record<string, {
+    body: string;
+    eyes?: string;
+    outline?: string;
+  }>;
 }
+
+type ListedPet = PetManifest & { source: string };
 
 interface PetEvent {
   type: string;
@@ -253,22 +259,11 @@ export class PetChannel {
       const rolePetId = this.resolveRolePetId(activeRole, pets);
       res.json({
         pets,
+        roleKeys: ['base', ...RoleResolver.listAvailableRoles()],
         defaultPetId: this.resolveDefaultPetId(pets, rolePetId),
         rolePetId,
         activeRole,
       });
-    });
-
-    this.router.get('/pet/pets/:petId/spritesheet', (req, res) => {
-      try {
-        const pet = this.resolvePet(req.params.petId);
-        res.sendFile(pet.spritesheetPath, err => {
-          if (!err || res.headersSent) return;
-          res.status(404).json({ error: err.message });
-        });
-      } catch (err: any) {
-        res.status(404).json({ error: err.message });
-      }
     });
 
     this.router.post('/pet/wake', async (req, res) => {
@@ -663,19 +658,18 @@ export class PetChannel {
     };
   }
 
-  private listPets(): Array<PetManifest & { spriteUrl: string; source: string }> {
-    const pets = new Map<string, PetManifest & { spriteUrl: string; source: string }>();
+  private listPets(): ListedPet[] {
+    const pets = new Map<string, ListedPet>();
 
     for (const root of this.petRoots()) {
       if (!fs.existsSync(root.dir)) continue;
       for (const entry of fs.readdirSync(root.dir, { withFileTypes: true })) {
         if (!entry.isDirectory() || !PET_ID_PATTERN.test(entry.name)) continue;
         try {
-          const resolved = this.readPet(path.join(root.dir, entry.name));
-          if (!pets.has(resolved.manifest.id)) {
-            pets.set(resolved.manifest.id, {
-              ...resolved.manifest,
-              spriteUrl: `/api/pet/pets/${encodeURIComponent(resolved.manifest.id)}/spritesheet`,
+          const manifest = this.readPet(path.join(root.dir, entry.name));
+          if (!pets.has(manifest.id)) {
+            pets.set(manifest.id, {
+              ...manifest,
               source: root.label,
             });
           }
@@ -689,7 +683,7 @@ export class PetChannel {
   }
 
   private resolveDefaultPetId(
-    pets: Array<PetManifest & { spriteUrl: string; source: string }> = this.listPets(),
+    pets: ListedPet[] = this.listPets(),
     rolePetId: string | null = this.resolveRolePetId(RoleResolver.getActiveRoleName() || null, pets),
   ): string | null {
     return rolePetId || pets.find(pet => pet.id === 'xiaoba')?.id || pets[0]?.id || null;
@@ -697,7 +691,7 @@ export class PetChannel {
 
   private resolveRolePetId(
     activeRole: string | null,
-    pets: Array<PetManifest & { spriteUrl: string; source: string }>,
+    pets: ListedPet[],
   ): string | null {
     if (!activeRole) return null;
 
@@ -713,17 +707,7 @@ export class PetChannel {
     return pets.some(pet => pet.id === configured) ? configured : null;
   }
 
-  private resolvePet(petId: string): { manifest: PetManifest; spritesheetPath: string } {
-    const normalized = this.normalizePetId(petId);
-    for (const root of this.petRoots()) {
-      const petDir = path.join(root.dir, normalized);
-      if (!fs.existsSync(petDir)) continue;
-      return this.readPet(petDir);
-    }
-    throw new Error(`pet not found: ${normalized}`);
-  }
-
-  private readPet(petDir: string): { manifest: PetManifest; spritesheetPath: string } {
+  private readPet(petDir: string): PetManifest {
     const manifestPath = path.join(petDir, 'pet.json');
     if (!fs.existsSync(manifestPath)) {
       throw new Error(`pet.json not found: ${manifestPath}`);
@@ -731,19 +715,14 @@ export class PetChannel {
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as PetManifest;
     const petId = normalizePetIdInput(manifest.id || path.basename(petDir), path.basename(petDir));
-    const spritesheetName = manifest.spritesheetPath || 'spritesheet.webp';
-    const spritesheetPath = path.resolve(petDir, spritesheetName);
-    if (!spritesheetPath.startsWith(path.resolve(petDir) + path.sep) || !fs.existsSync(spritesheetPath)) {
-      throw new Error(`spritesheet not found: ${spritesheetName}`);
+    const renderer = typeof manifest.renderer === 'string' ? manifest.renderer.trim() : '';
+    if (renderer !== 'grok-cat-v1') {
+      throw new Error(`unsupported pet renderer: ${renderer}`);
     }
-
     return {
-      manifest: {
-        ...manifest,
-        id: petId,
-        spritesheetPath: path.basename(spritesheetPath),
-      },
-      spritesheetPath,
+      ...manifest,
+      id: petId,
+      renderer,
     };
   }
 

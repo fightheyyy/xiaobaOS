@@ -19,7 +19,7 @@ max-turns: 20
 https://github.com/fightheyyy/XiaoBa-RoleHub
 ```
 
-RoleHub 只维护轻量索引，不托管 role 源码，也不托管桌宠 spritesheet。Role 源码必须放在独立公开 GitHub 仓库。仓库名不要求固定格式，例如：
+RoleHub 只维护轻量索引，不托管 role 源码或桌宠 manifest。Role 源码必须放在独立公开 GitHub 仓库。仓库名不要求固定格式，例如：
 
 ```text
 https://github.com/<user>/xiaoba-role-<name>
@@ -31,7 +31,7 @@ RoleHub 发布规则：
 - 只修改 `registry.json`。
 - 只新增一个 role registry 条目，除非用户明确要求修正已存在条目。
 - 不复制 `roles/<name>` 到 RoleHub 仓库。
-- 不复制 `pets/<pet-id>` 或 spritesheet 到 RoleHub 仓库；自定义桌宠资源应该放在独立 role 仓库中。
+- 不复制 `pets/<pet-id>` 到 RoleHub 仓库；自定义程序化桌宠 manifest 应该放在独立 role 仓库中。
 - 需要 fork `fightheyyy/XiaoBa-RoleHub`，但 fork 中也只改 `registry.json`。
 - 不重排、删除、批量格式化已有 registry 条目。
 - 提交前必须检查 `git diff -- registry.json`，确认 diff 只包含目标 role 的索引增量。
@@ -100,12 +100,12 @@ xiaoba-role-<name>
 如果用户要发布自定义桌宠资源，独立 role 仓库还应该包含：
 
 - `pets/<petId>/pet.json`
-- `pets/<petId>/<spritesheet>`，通常是 `spritesheet.webp`
 
 桌宠发布约束：
 
 - `role.json.metadata.petId`、registry 的 `pet.id`、`pets/<petId>/pet.json` 的 `id` 应一致。
-- `pet.json.spritesheetPath` 必须指向同一 pet 目录内的文件。
+- `pet.json.renderer` 必须是 `grok-cat-v1`；不接受 `spritesheetPath`、sprite atlas 或其他 renderer。
+- `pet.json.roleThemes` 可按 Role 声明 body、eyes 与可选 outline 颜色。
 - 如果用户不上传 pet，不要为了默认资源复制 `xiaoba` pet；省略 registry 的 `pet` 字段即可。
 
 ### Step 3：Fork 当前官方 RoleHub
@@ -210,7 +210,7 @@ xiaoba-role-<name>
 - `repo` 指向独立公开 GitHub 仓库
 - 独立 role 仓库包含 `role.json`
 - 独立 role 仓库包含 `role.json` 引用的 prompt 文件
-- 如果 registry 包含 `pet`，独立 role 仓库包含 `pet.repoPath/pet.json` 和对应 spritesheet
+- 如果 registry 包含 `pet`，独立 role 仓库包含 `pet.repoPath/pet.json`，且 renderer 为 `grok-cat-v1`
 - 如果 registry 不包含 `pet`，明确接受默认 `xiaoba` runtimepet 回退
 - RoleHub fork 里没有 role 源码，只包含 `registry.json` 增量
 - 没有删除、重排、批量格式化已有 registry 条目
@@ -221,7 +221,7 @@ xiaoba-role-<name>
 - **Windows**：临时目录改用 `%TEMP%`
 - **如果推送失败**：先检查 `gh auth status`、fork 地址和 `origin` 是否指向自己的 fork
 - **Role 依赖**：提醒用户在独立 role 仓库的 README 里说明依赖、适用场景和启用方式
-- **Pet 资源**：自定义 pet 是可选增强，不是发布阻断项；不上传时不要复制默认 `xiaoba` runtimepet
+- **Pet 资源**：只支持程序化 manifest；自定义 pet 是可选增强，不上传时不要复制默认 `xiaoba` runtimepet
 - **Registry-only**：RoleHub 改动不应该包含 role 源码、README 大改或无关格式化
 
 ## 简化流程总结

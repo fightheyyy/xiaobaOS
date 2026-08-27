@@ -25,9 +25,21 @@ const RETIRED_BASE_SKILL_FILES = {
     'SKILL.md': 'df7eb5741a9bbc5f5ed89ac90f5aec041920985a3772f9d5c24cbc4e1ddaec4a',
   },
 };
-const LEGACY_ROLE_CONFIG_SHA256 = {
-  'browser-cat': '011fd179328b55cc375d3ef62794786369a05213d64e735be92ec4c56c7b2c46',
-  'gui-cat': '507bb834c6814ee30a5f7e883e6bd622c40fd97dfc8119804683d9b309656b75',
+const LEGACY_ROLE_CONFIG_SHA256S = {
+  'user-cat': ['b4b5067d48a4a68f7dbc66a278add5fec6ee8b24ce8e7f1f0fc596a38c8bb30e'],
+  'inspector-cat': ['0a6070c07f7d9a58f5cdca38534dc88426e65eed06cc39e265ec0e9de59c2b84'],
+  'reviewer-cat': ['0a543e99c6f678b358af30e93de180ad7f6cc7d698c6e5f32c5cd9c5cee29fcd'],
+  'engineer-cat': ['0b1582cbeac08d38f169873bf3c617a9dbad86e22ef527e8028ad486092ed835'],
+  'browser-cat': [
+    '011fd179328b55cc375d3ef62794786369a05213d64e735be92ec4c56c7b2c46',
+    'db5c1aa2d1bc88c8f7cca7894ac44edf95ddedaefe1b1b4f9b8d480269139faa',
+  ],
+  'gui-cat': [
+    '507bb834c6814ee30a5f7e883e6bd622c40fd97dfc8119804683d9b309656b75',
+    '897c0e339735ac1efb40ecb0dd5f2808d03ac549dd19c6f83f8922d0c98be816',
+  ],
+  'secretary-cat': ['c973a78c9e5f80b3f6715568b4b664346ae63d8ce44a0986d3df206a00e752e2'],
+  'evolution-cat': ['d44340e34419f00a4775d5ae13b5f7a1ca3577b8c4b509c859733d22495c66e3'],
 };
 let mainWindow = null;
 let tray = null;
@@ -224,17 +236,17 @@ async function startServer() {
       }
 
       // Existing built-in role directories are normally user-owned. Migrate only
-      // the exact pre-pet role.json shipped by XiaoBa, and add the bundled petId
-      // without replacing prompts, skills, or any other role files.
+      // exact role.json versions previously shipped by XiaoBa, and update the
+      // bundled petId without replacing prompts, skills, or any other role files.
       const bundledRoleConfigPath = path.join(src, 'role.json');
       const installedRoleConfigPath = path.join(dest, 'role.json');
-      const legacyRoleConfigSha256 = LEGACY_ROLE_CONFIG_SHA256[roleName];
-      if (legacyRoleConfigSha256
+      const legacyRoleConfigSha256s = LEGACY_ROLE_CONFIG_SHA256S[roleName] || [];
+      if (legacyRoleConfigSha256s.length
         && fs.existsSync(bundledRoleConfigPath)
         && fs.existsSync(installedRoleConfigPath)
-        && crypto.createHash('sha256')
+        && legacyRoleConfigSha256s.includes(crypto.createHash('sha256')
           .update(fs.readFileSync(installedRoleConfigPath))
-          .digest('hex') === legacyRoleConfigSha256) {
+          .digest('hex'))) {
         const bundledRoleConfig = JSON.parse(fs.readFileSync(bundledRoleConfigPath, 'utf8'));
         const installedRoleConfig = JSON.parse(fs.readFileSync(installedRoleConfigPath, 'utf8'));
         installedRoleConfig.metadata = {

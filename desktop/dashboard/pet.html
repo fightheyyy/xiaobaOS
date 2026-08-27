@@ -64,7 +64,7 @@
     .sprite {
       width: 192px;
       height: 208px;
-      image-rendering: pixelated;
+      image-rendering: auto;
       transform: scale(1.05);
     }
     .row {
@@ -191,23 +191,14 @@
       </div>
     </section>
   </main>
+  <script src="/grokbot-data.js"></script>
+  <script src="/pet-runtime.js"></script>
   <script>
-    const animations = {
-      idle: { row: 0, durations: [280, 110, 110, 140, 140, 320] },
-      'running-right': { row: 1, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
-      'running-left': { row: 2, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
-      waving: { row: 3, durations: [140, 140, 140, 280] },
-      jumping: { row: 4, durations: [140, 140, 140, 140, 280] },
-      failed: { row: 5, durations: [140, 140, 140, 140, 140, 140, 140, 240] },
-      waiting: { row: 6, durations: [150, 150, 150, 150, 150, 260] },
-      running: { row: 7, durations: [120, 120, 120, 120, 120, 220] },
-      review: { row: 8, durations: [150, 150, 150, 150, 150, 280] },
-    };
-    const cell = { width: 192, height: 208 };
+    const animations = XiaoBaPetRuntime.animations;
     const sprite = document.getElementById('pet-sprite');
-    const spriteCtx = sprite.getContext('2d');
-    const spriteAtlas = new Image();
+    const player = new XiaoBaPetRuntime.PetPlayer(sprite);
     let pets = [];
+    let petRoleKeys = ['base'];
     const petRoleStorageKey = 'xiaoba.pet.role';
     let selectedPetId = localStorage.getItem('xiaoba.pet.id') || '';
     let selectedPetRole = localStorage.getItem(petRoleStorageKey) || '';
@@ -219,62 +210,15 @@
     let lastTextReason = '';
     let idleTimer = null;
     let currentState = 'idle';
-    let currentFrame = 0;
-    let frameStartedAt = 0;
-    let animationFrameId = 0;
 
     function setState(state, force = false, options = {}) {
       if (!animations[state]) state = 'idle';
-      if (currentState !== state || force) {
-        currentState = state;
-        currentFrame = 0;
-        frameStartedAt = performance.now();
-        drawFrame();
-      }
+      currentState = state;
+      player.setState(state, force);
       document.getElementById('pet-state').textContent = state;
       clearTimeout(idleTimer);
       if (options.hold) return;
       if (state === 'waving' && !busy) idleTimer = setTimeout(() => setState('idle'), 1300);
-    }
-
-    function drawFrame() {
-      if (!spriteAtlas.complete || !spriteAtlas.naturalWidth) return;
-      const cfg = animations[currentState] || animations.idle;
-      spriteCtx.clearRect(0, 0, cell.width, cell.height);
-      spriteCtx.imageSmoothingEnabled = false;
-      spriteCtx.drawImage(
-        spriteAtlas,
-        currentFrame * cell.width,
-        cfg.row * cell.height,
-        cell.width,
-        cell.height,
-        0,
-        0,
-        cell.width,
-        cell.height
-      );
-    }
-
-    function tick(now) {
-      const cfg = animations[currentState] || animations.idle;
-      const duration = cfg.durations[currentFrame] || 140;
-      if (!frameStartedAt) frameStartedAt = now;
-      if (now - frameStartedAt >= duration) {
-        currentFrame = (currentFrame + 1) % cfg.durations.length;
-        frameStartedAt = now;
-        drawFrame();
-      }
-      animationFrameId = requestAnimationFrame(tick);
-    }
-
-    function loadSprite(src) {
-      spriteCtx.clearRect(0, 0, cell.width, cell.height);
-      spriteAtlas.onload = () => {
-        cancelAnimationFrame(animationFrameId);
-        setState('idle', true);
-        animationFrameId = requestAnimationFrame(tick);
-      };
-      spriteAtlas.src = src;
     }
 
     function appendBubble(kind, text) {
@@ -303,6 +247,7 @@
       const res = await fetch('/api/pet/pets');
       const data = await res.json();
       pets = Array.isArray(data.pets) ? data.pets : [];
+      petRoleKeys = Array.isArray(data.roleKeys) ? data.roleKeys : ['base'];
       const roleKey = data.activeRole || 'base';
       const defaultPetId = data.rolePetId || data.defaultPetId || '';
       const defaultPetExists = defaultPetId && pets.some(p => p.id === defaultPetId);
@@ -354,7 +299,13 @@
       document.getElementById('pet-desc').textContent = pet.description || 'Pet 本地交互平台';
       selectedSessionKey = roleScopedSessionKey(selectedPetId, selectedPetRole);
       document.getElementById('pet-session').textContent = selectedSessionKey || ('pet:' + pet.id);
-      loadSprite(pet.spriteUrl);
+      player.load({
+        ...pet,
+        roleThemes: XiaoBaPetRuntime.buildUniqueRoleThemes(
+          petRoleKeys.concat(selectedPetRole || 'base'),
+          pet.roleThemes,
+        ),
+      }, { role: selectedPetRole });
       if (!document.getElementById('messages').children.length) appendEvent('pet:' + pet.id);
       setState('idle', true);
     }

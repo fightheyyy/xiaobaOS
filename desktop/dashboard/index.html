@@ -966,10 +966,11 @@
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 10px 24px rgba(28, 30, 58, 0.08);
     }
 
-    .role-avatar img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
+    .role-avatar canvas,
+    .sidebar-brand-icon canvas {
+      width: 92%;
+      height: auto;
+      max-height: 100%;
       display: block;
     }
 
@@ -3543,7 +3544,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-brand">
-      <div class="sidebar-brand-icon"><img src="cat-icon.png" style="width:100%;height:100%;object-fit:contain;border-radius:inherit" alt="XiaoBa"></div>
+      <div class="sidebar-brand-icon"><canvas width="192" height="208" data-xiaoba-role-avatar="base" role="img" aria-label="XiaoBa"></canvas></div>
       <div>
         <div class="sidebar-brand-text">XiaoBa Runtime</div>
         <div class="sidebar-brand-ver">v-</div>
@@ -3679,6 +3680,7 @@
     </div>
   </div>
 
+  <script src="grokbot-data.js"></script>
   <script src="pet-runtime.js"></script>
   <script>
     (function markShellPlatform() {
@@ -3703,7 +3705,7 @@
         async sendMessage() {}
         connect() { return { close() {} }; }
       },
-      SpritePlayer: class {
+      PetPlayer: class {
         constructor() {}
         load() {}
         setState() {}
@@ -4046,17 +4048,11 @@
     let petInputComposing = false;
     let petInputCompositionEndedAt = 0;
     const skillGroupCollapsed = { role: false, runtime: false };
-    const roleAvatars = {
-      base: 'cat-icon.png',
-      default: 'cat-icon.png',
-      none: 'cat-icon.png',
-      'researcher-cat': 'role-icons/researcher-cat.png',
-      'inspector-cat': 'role-icons/inspector-cat.png',
-      'engineer-cat': 'role-icons/engineer-cat.png',
-      'reviewer-cat': 'role-icons/reviewer-cat.png',
-      'browser-cat': 'role-icons/browser-cat.png',
-      'gui-cat': 'role-icons/gui-cat.png',
-    };
+    let dashboardAvatarManifest = Object.freeze({
+      renderer: XiaoBaPetRuntime.rendererName,
+      roleThemes: XiaoBaPetRuntime.defaultRoleThemes,
+    });
+    let roleAvatarHydrationFrame = 0;
     const serviceLabelKeys = {
       feishu: 'serviceFeishu',
       weixin: 'serviceWeixin',
@@ -4613,15 +4609,47 @@
       petRuntimeEventHandler(event);
     }
 
-    function getRoleAvatar(role) {
-      const name = typeof role === 'string' ? role : (role && role.name) || 'base';
-      return roleAvatars[name] || 'cat-icon.png';
+    function hydrateRoleAvatars(root = document) {
+      root.querySelectorAll('canvas[data-xiaoba-role-avatar]:not([data-xiaoba-rendered])').forEach(canvas => {
+        const role = canvas.getAttribute('data-xiaoba-role-avatar') || 'base';
+        try {
+          const player = new XiaoBaPetRuntime.PetPlayer(canvas);
+          player.load(dashboardAvatarManifest, { role, autoplay: false });
+          canvas.setAttribute('data-xiaoba-rendered', 'true');
+        } catch (error) {
+          canvas.setAttribute('data-xiaoba-render-error', String(error && error.message || error));
+        }
+      });
+    }
+
+    function setDashboardRoleInventory(roleKeys) {
+      dashboardAvatarManifest = Object.freeze({
+        renderer: XiaoBaPetRuntime.rendererName,
+        roleThemes: XiaoBaPetRuntime.buildUniqueRoleThemes(
+          Array.isArray(roleKeys) ? roleKeys : [],
+          XiaoBaPetRuntime.defaultRoleThemes,
+        ),
+      });
+      document.querySelectorAll('canvas[data-xiaoba-role-avatar]').forEach(canvas => {
+        canvas.removeAttribute('data-xiaoba-rendered');
+        canvas.removeAttribute('data-xiaoba-render-error');
+      });
+      queueRoleAvatarHydration();
+    }
+
+    function queueRoleAvatarHydration() {
+      if (roleAvatarHydrationFrame) return;
+      roleAvatarHydrationFrame = requestAnimationFrame(() => {
+        roleAvatarHydrationFrame = 0;
+        hydrateRoleAvatars();
+      });
     }
 
     function renderRoleAvatar(role, size) {
-      const src = getRoleAvatar(role);
+      const roleName = normalizeRoleKey(typeof role === 'string' ? role : (role && role.name) || 'base');
       const label = typeof role === 'string' ? role : (role && (role.displayName || role.name)) || 'Base';
-      return '<span class="role-avatar '+(size || '')+'"><img src="'+escapeHtml(src)+'" alt="'+escapeHtml(label)+' avatar" /></span>';
+      queueRoleAvatarHydration();
+      return '<span class="role-avatar '+(size || '')+'"><canvas width="192" height="208" data-xiaoba-role-avatar="'+escapeHtml(roleName)+'" role="img" aria-label="'+escapeHtml(label)+' avatar"></canvas></span>';
     }
 
     async function fetchStatus() {
@@ -4878,6 +4906,7 @@
 
     function renderRoles(data) {
       const roles = data.roles || [];
+      setDashboardRoleInventory(roles.map(role => role.name));
       document.getElementById('role-count').textContent = roles.length;
       const active = roles.find(r => r.active) || roles.find(r => r.name === 'base') || null;
       updateActiveRolePill(active);
@@ -5081,6 +5110,7 @@
 
     // Init
     applyLanguage();
+    queueRoleAvatarHydration();
     fetchStatus();fetchSkills();fetchRoles();fetchConfig();fetchStore();fetchPets();
     const initialPage = new URLSearchParams(location.search).get('page');
     if (initialPage && pageTitles[initialPage]) switchPage(initialPage);

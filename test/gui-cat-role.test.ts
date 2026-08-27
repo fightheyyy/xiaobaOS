@@ -50,7 +50,7 @@ describe('GuiCat role contract', () => {
     assert.deepEqual(config.confirmedToolGate.tools, ['gui_confirmed_action']);
     assert.equal(config.metadata.driver, 'peekaboo');
     assert.equal(config.metadata.driverVersion, '3.8.x');
-    assert.equal(config.metadata.petId, 'gui-cat');
+    assert.equal(config.metadata.petId, 'xiaoba');
     assert.equal(RoleResolver.resolveRoleDirectoryName('gui'), 'gui-cat');
     assert.equal(RoleResolver.resolveRoleDirectoryName('computer-use'), 'gui-cat');
 

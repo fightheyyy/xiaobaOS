@@ -1,7 +1,7 @@
 # Roles & Skills SPEC
 
 状态：Active
-最后更新：2026-08-03
+最后更新：2026-08-27
 适用范围：Base、八个默认 Role、Role-local Skills、共享 review roles 和 Evolution。
 
 本文是 XiaoBa-CLI `Roles & Skills` 模块的唯一架构真相源。
@@ -52,6 +52,8 @@ Out of scope:
 - EngineerCat 现在拥有一个 role-scoped `codex_run`：官方 SDK 负责 Codex thread start/resume，XiaoBa 只负责固定工作区、只读/可写模式、中止和结构化证据。原生 coding tools 保留为小修改和降级路径；Source Candidate builder 显式隐藏该 Tool。
 
 旧 nightly typed DAG、manual promote CLI 与 capability lifecycle 已删除。发行目录里的 Role/Skill package 都可被 Runtime 发现；Candidate 只存在于 Evolution run 的隔离目录，旧 package 内的 `status` 字段不再参与解析。
+
+八个默认 Role 的 `metadata.petId` 现在统一选择 Surface 的 `xiaoba`；角色身份仍由 role package 决定，颜色只影响视觉。Pet/Chat 动画、Dashboard Role 卡片、当前角色徽标和侧栏品牌都消费同一套共享视觉；默认九色固定，非默认 Role 无需在 package 中保存颜色，由 Surface 根据完整已安装 Role inventory 确定性分配不重复 body color，显式 theme 撞色也会重新分配。显式 Role publish 若携带自定义 pet，也只能发布 Surface 接受的 `grok-cat-v1` manifest，不再发布 spritesheet。
 
 ```mermaid
 flowchart LR
@@ -136,6 +138,7 @@ roles/<role-name>/
 ```
 
 - `role.json` 声明 role identity、aliases、prompt、tool policy 和 confirmation gate。
+- `role.json` 的 `metadata.petId` 只选择 Surface 视觉资源，不授予权限或创建第二套 role runtime；多个 Role 可以共享同一个 pet。Base 与八个默认 Role 使用 `grok-cat-v1` 的固定 theme；用户安装或创建的 Role 不需要新增颜色字段，由 Surface 基于完整 inventory 在 Pet/Chat 与 Dashboard 头像中统一分配不重复颜色。
 - prompt 与 Skill 是运行时 source asset，不承载架构历史。
 - Native role tools 位于 `src/roles/**`，统一经过 ToolManager。
 - Base 默认携带零个 Skill；独立 Skill 必须显式安装。

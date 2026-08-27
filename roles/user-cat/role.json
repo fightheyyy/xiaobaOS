@@ -13,6 +13,7 @@
   "inheritBaseTools": false,
   "baseToolAllowlist": [],
   "metadata": {
+    "petId": "xiaoba",
     "toolPolicy": "one-natural-user-turn-or-explicit-live-trace",
     "promptProvenance": "Adapted from langwatch/scenario UserSimulatorAgent (Apache-2.0)"
   }

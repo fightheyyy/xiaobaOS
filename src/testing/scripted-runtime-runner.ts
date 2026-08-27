@@ -5147,9 +5147,8 @@ function writeSurfaceRuntimeWorkspace(
     id: config.petId,
     displayName: 'Alpha Puff',
     description: 'Eval surface runtime pet',
-    spritesheetPath: 'spritesheet.webp',
+    renderer: 'grok-cat-v1',
   }, null, 2)}\n`, 'utf-8');
-  fs.writeFileSync(path.join(petDir, 'spritesheet.webp'), Buffer.from([0x52, 0x49, 0x46, 0x46]));
 
   const roleDir = path.join(root, 'roles', config.roleName);
   fs.mkdirSync(roleDir, { recursive: true });

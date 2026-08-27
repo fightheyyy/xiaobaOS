@@ -24,7 +24,7 @@
     ]
   },
   "metadata": {
-    "petId": "browser-cat",
+    "petId": "xiaoba",
     "driver": "agent-browser",
     "driverVersion": "0.31.1",
     "toolPolicy": "xiaoba-agent-loop-plus-typed-browser-capabilities-and-read-only-context"

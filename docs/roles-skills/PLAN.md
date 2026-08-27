@@ -1,7 +1,7 @@
 # Roles & Skills PLAN
 
 状态：Active
-最后更新：2026-08-03
+最后更新：2026-08-27
 Owner：Policy maintainers
 
 ## Current Status
@@ -21,6 +21,8 @@ Owner：Policy maintainers
 - 旧 nightly typed DAG、patch workspace/regression、manual promote CLI 与专用 Reviewer replay Tool 已删除。
 - runtime Candidate lifecycle、Dashboard Promote/Unblock API/UI 与 `CapabilityStatus` 类型已删除。
 - 发行目录中的 Role/Skill 一律作为已安装 package 加载；旧 `status` 元数据被忽略。
+- 八个默认 Role 的视觉资源已收敛到共享程序化 XiaoBa；Pet/Chat、Dashboard Role 卡片、当前角色徽标和侧栏品牌统一消费 Surface role theme。默认九色固定，用户安装或创建的 Role 由 Surface inventory 分配器自动获得不重复颜色，不改变角色职责或工具权限。
+- Role publish 的自定义 pet 约定已收敛为程序化 manifest，不再发布或校验 spritesheet。
 
 ```mermaid
 flowchart LR
@@ -42,6 +44,9 @@ flowchart LR
 10. 生产级 next-Session atomic activation adapter：completed for Role/Skill。
 11. EngineerCat Source Candidate adapter：completed for code Findings and next-process activation。
 12. EngineerCat Codex execution adapter：completed；official SDK behind one role Tool, native fallback retained。
+13. Shared default-role visual identity：completed；默认 Role 统一选择 `xiaoba`，Pet/Chat 与 Dashboard 头像颜色均由 Surface manifest 解析。
+14. Procedural-only pet publishing：completed；RoleHub pet entry 只引用 `grok-cat-v1` manifest。
+15. Unique installed-role visual identity：completed；用户创建或安装 Role 无需维护颜色字段，Surface 会基于完整 inventory 分配不重复 body color。
 
 ## Next Steps
 
@@ -65,6 +70,8 @@ flowchart LR
 - Evolution 只调用 shared Test + Eval，不拥有重复实现。
 - pass Role/Skill Candidate 只对新 Session 激活；pass code Candidate 只对下一进程激活；其他结果不改变当前版本。
 - 不引入 RouterCat、Recovery Role 或通用任务框架。
+- 八个默认 Role 共用 `xiaoba` pet identity；颜色差异不改变 role prompt、tools、permissions 或 session semantics。
+- 用户创建或安装的新 Role 无需复制 pet 或声明颜色；Surface 分配的 body color 必须与当前已安装 Role inventory 中的全部颜色不同。
 
 ## Risks / Open Questions
 
@@ -74,7 +81,7 @@ flowchart LR
 
 ## Recent Verification
 
-- `npm test` passed 561/561 across 102 suites。
+- `npm test` passed 584/584 across 105 suites。
 - EngineerCat 相关 focused tests passed 31/31 across 5 suites；真实官方 SDK read-only start/resume smoke 保持同一 thread id，且没有文件改动或外部工具调用；macOS arm64 packaged adapter resume 也通过。
 - 真实 EngineerCat production-path E2E 经共享 Agent loop 新建 Codex thread，并在下一用户轮指定返回的 `thread_id` 成功续接；角色仍只暴露一个 Codex Tool。
 - Role/Skill 生命周期清理 focused tests passed 42/42 across 9 suites。
@@ -86,3 +93,4 @@ flowchart LR
 - Inspector Finding+Case tests passed 4/4。
 - UserCat Scenario tests passed 3/3。
 - `npm run build` passed。
+- Dashboard/Pet focused tests passed 35/35；coverage includes default-role identity、4096 collision-free custom-role slots、explicit collision reassignment、canonical-key collision rejection、shared procedural avatars and removal of legacy PNG mappings。Playwright verified 14/14 unique live Role canvas colors with zero renderer errors。Procedural-only Pet coverage includes `grok-cat-v1` publishing contracts and rejection of legacy sprite manifests。Exact-hash Electron migration updates previously shipped built-in configs without overwriting user-modified role files.

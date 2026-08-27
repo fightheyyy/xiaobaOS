@@ -25,12 +25,10 @@
     .sprite {
       width: 192px;
       height: 208px;
-      image-rendering: pixelated;
-      animation: floaty 3.4s ease-in-out infinite;
+      image-rendering: auto;
       filter: drop-shadow(0 14px 18px rgba(20, 28, 40, 0.22));
       cursor: pointer;
-      transform-origin: 50% 82%;
-      will-change: transform, filter;
+      will-change: filter;
       transition: filter 160ms ease;
     }
     .sprite:hover {
@@ -40,7 +38,6 @@
       cursor: grabbing;
     }
     body.dragging .sprite {
-      animation-play-state: running;
       filter: drop-shadow(0 20px 24px rgba(20, 28, 40, 0.28));
     }
     .notice,
@@ -113,10 +110,6 @@
     .prompt button:hover {
       background: rgba(38, 52, 72, 0.14);
     }
-    @keyframes floaty {
-      0%, 100% { transform: translateY(0) scale(1); }
-      50% { transform: translateY(-4px) scale(1.01); }
-    }
   </style>
 </head>
 <body>
@@ -129,6 +122,7 @@
     <button type="submit" title="发送">↵</button>
     <button type="button" id="open-chat" title="打开对话">↗</button>
   </form>
+  <script src="/grokbot-data.js"></script>
   <script src="/pet-runtime.js"></script>
   <script>
     const params = new URLSearchParams(location.search);
@@ -139,7 +133,7 @@
     const promptInput = document.getElementById('prompt-input');
     const openChatButton = document.getElementById('open-chat');
     const client = new XiaoBaPetRuntime.PetClient();
-    const player = new XiaoBaPetRuntime.SpritePlayer(sprite);
+    const player = new XiaoBaPetRuntime.PetPlayer(sprite);
     let selectedPetId = '';
     let selectedSessionKey = '';
     let activeRole = '';
@@ -291,7 +285,10 @@
       activeRole = roleKey;
       selectedPetId = pet.id;
       selectedSessionKey = roleScopedSessionKey(selectedPetId, activeRole);
-      player.load(pet.spriteUrl);
+      player.load({
+        ...pet,
+        roleThemes: XiaoBaPetRuntime.buildUniqueRoleThemes(data.roleKeys, pet.roleThemes),
+      }, { role: activeRole });
       connectEvents();
     }
 

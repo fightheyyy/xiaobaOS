@@ -49,6 +49,14 @@ describe('default packaged policy assets', () => {
     assert.ok(bundledRoles.includes('gui-cat'));
     assert.ok(bundledRoles.includes('secretary-cat'));
     assert.ok(bundledRoles.includes('evolution-cat'));
+
+    for (const roleName of DEFAULT_BUNDLED_ROLES) {
+      const config = JSON.parse(fs.readFileSync(
+        path.join(process.cwd(), 'roles', roleName, 'role.json'),
+        'utf-8',
+      ));
+      assert.strictEqual(config.metadata?.petId, 'xiaoba', `${roleName} must share the XiaoBa renderer`);
+    }
   });
 
   test('electron startup sync includes takeover roles and narrowly migrates exact bundled assets', () => {
@@ -66,7 +74,7 @@ describe('default packaged policy assets', () => {
     assert.match(mainSource, /df7eb5741a9bbc5f5ed89ac90f5aec041920985a3772f9d5c24cbc4e1ddaec4a/);
     assert.match(mainSource, /retireExactLegacyBaseSkills/);
     assert.match(mainSource, /migration-backups', 'base-skills'/);
-    assert.match(mainSource, /LEGACY_ROLE_CONFIG_SHA256/);
+    assert.match(mainSource, /LEGACY_ROLE_CONFIG_SHA256S/);
     assert.match(mainSource, /petId: bundledRoleConfig\.metadata\.petId/);
     assert.match(mainSource, /createHash\('sha256'\)/);
     assert.match(mainSource, /migration-backups/);

@@ -42,7 +42,7 @@ describe('BrowserCat role contract', () => {
     assert.deepStrictEqual(config.confirmedToolGate.tools, ['browser_click_confirmed']);
     assert.strictEqual(config.metadata.driver, 'agent-browser');
     assert.strictEqual(config.metadata.driverVersion, '0.31.1');
-    assert.strictEqual(config.metadata.petId, 'browser-cat');
+    assert.strictEqual(config.metadata.petId, 'xiaoba');
 
     const skillManager = new SkillManager('browser-cat');
     await skillManager.loadSkills();

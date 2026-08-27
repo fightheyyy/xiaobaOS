@@ -118,6 +118,7 @@
     ]
   },
   "metadata": {
+    "petId": "xiaoba",
     "modelHint": "gemma4:e4b-mlx via Ollama",
     "toolPolicy": "xiaoba-confirmed-wrappers-over-official-lark-cli",
     "capabilitySource": "https://github.com/larksuite/cli"

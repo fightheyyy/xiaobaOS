@@ -14,5 +14,8 @@
     "check_subagent",
     "stop_subagent",
     "resume_subagent"
-  ]
+  ],
+  "metadata": {
+    "petId": "xiaoba"
+  }
 }

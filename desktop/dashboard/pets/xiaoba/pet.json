@@ -1,6 +1,17 @@
 {
   "id": "xiaoba",
   "displayName": "XiaoBa",
-  "description": "A warm caramel pixel creature with tall ears, a black jagged hair cap, tiny black square eyes, and a soft rounded body.",
-  "spritesheetPath": "spritesheet.webp"
+  "description": "A live small-devil cat whose eyes and body motion respond to XiaoBa's runtime state.",
+  "renderer": "grok-cat-v1",
+  "roleThemes": {
+    "base": { "body": "#17140F", "eyes": "#E5B94F", "outline": "#C79A3B" },
+    "user-cat": { "body": "#E76F51", "eyes": "#281A12" },
+    "inspector-cat": { "body": "#3A86FF", "eyes": "#FFFDF7" },
+    "reviewer-cat": { "body": "#8338EC", "eyes": "#FFFDF7" },
+    "engineer-cat": { "body": "#2A9D78", "eyes": "#FFFDF7" },
+    "browser-cat": { "body": "#19A7CE", "eyes": "#14272D" },
+    "gui-cat": { "body": "#E85D9E", "eyes": "#2B1721" },
+    "secretary-cat": { "body": "#F4A261", "eyes": "#2B1C12" },
+    "evolution-cat": { "body": "#74A94A", "eyes": "#17220F" }
+  }
 }
