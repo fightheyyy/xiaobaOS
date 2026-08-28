@@ -8,7 +8,8 @@ permissions:
 
 jobs:
   windows-x64:
-    runs-on: windows-latest
+    # deasync is rebuilt for Electron with node-gyp, which requires the VS 2022 C++ toolchain.
+    runs-on: windows-2022
     timeout-minutes: 45
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
