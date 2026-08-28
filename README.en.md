@@ -219,6 +219,7 @@ The current claim boundary, recent results, and open risks live in the [Project 
 
 - The macOS Electron DMG is an Apple Silicon arm64 Preview with an ad-hoc signature and no notarization.
 - The Windows Electron installer targets x64 and is currently unsigned, so SmartScreen may warn on first install.
+- The Windows Preview does not bundle the macOS-only Peekaboo driver, so GuiCat desktop takeover is unavailable on Windows; the native `workspace_write` sandbox is also macOS-only and fails closed elsewhere.
 - Desktop child services do not embed Node and currently require system Node.js 18.19 or newer; if Finder cannot discover Homebrew / nvm Node, set `XIAOBA_NODE_EXE` to its absolute executable path.
 - BrowserCat, GuiCat, and SecretaryCat depend on their corresponding drivers / CLIs and the required installation, permissions, or login state; run `xiaoba doctor` first.
 - The Preview keeps the not-yet-verified automatic update channel disabled; install updates manually from GitHub Releases.

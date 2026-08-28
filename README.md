@@ -240,6 +240,7 @@ xiaoba chat
 
 - macOS Electron DMG 是 Apple Silicon arm64 Preview，采用 ad-hoc 签名且尚未 notarize。
 - Windows Electron 安装包面向 x64，当前未做代码签名，首次安装可能触发 SmartScreen 提示。
+- Windows Preview 不捆绑仅 macOS 可用的 Peekaboo，因此 GuiCat 桌面接管在 Windows 上不可用；`workspace_write` 原生沙箱也只在 macOS 开放，其他平台 fail closed。
 - 桌面子服务不内嵌 Node，当前需要系统 Node.js 18.19 或更高版本；若 Finder 无法发现 Homebrew / nvm 的 Node，请用 `XIAOBA_NODE_EXE` 指向绝对可执行路径。
 - BrowserCat、GuiCat 和 SecretaryCat 依赖对应 driver / CLI，以及必要的安装、权限或登录状态；可先运行 `xiaoba doctor` 检查。
 - Preview 默认关闭尚未完成端到端验证的自动更新通道，新版本通过 GitHub Release 手动安装。

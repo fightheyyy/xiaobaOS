@@ -13,7 +13,7 @@ Owner：Surface maintainers
 - Feishu/Pet runtime smoke 已覆盖文本、文件和 external receipt 基本形态。
 - Feishu Surface App ID 已作为 canonical application identity；SecretaryCat 按同 App ID 显式选择官方 `lark-cli` profile，不修改全局 active profile。
 - macOS Electron packaging maps the optional `@steipete/peekaboo@3.8.0` binary to GuiCat's fixed `resources/drivers/peekaboo/peekaboo` path.
-- Windows Electron packaging runs on a native Windows x64 GitHub runner so native Node dependencies are rebuilt for the target platform instead of being copied from macOS.
+- Windows Electron packaging runs on a native Windows x64 GitHub runner so native Node dependencies are rebuilt for the target platform instead of being copied from macOS；the release gate runs a focused desktop Surface profile, verifies packaged roles/rendering contracts, and launches the unpacked Dashboard for a real HTTP readiness smoke.
 - Dashboard、Pet 和 Bridge 的网络认证与 Owner 授权仍未闭合。
 - `evolution sleep` 与 schedule 已进入轻量 Evolution control；manual promote CLI 已删除。
 - Dashboard capability lifecycle API/UI 已删除；Role/Skill 卡片只保留选择、安装和删除 package。

@@ -29,11 +29,94 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
-      - name: Run repository tests
-        run: npm test
+      - name: Run Windows desktop release tests
+        shell: pwsh
+        run: |
+          $tests = @(
+            'test/computer-role-routing.test.ts'
+            'test/conversation-journal.test.ts'
+            'test/conversation-surface.test.ts'
+            'test/dashboard-config-api.test.ts'
+            'test/dashboard-observability-api.test.ts'
+            'test/dashboard-pet-runtime.test.ts'
+            'test/dashboard-service-logs.test.ts'
+            'test/dashboard-skills-api.test.ts'
+            'test/default-role-bundle.test.ts'
+            'test/pet-channel.test.ts'
+            'test/prompt-manager-runtime-info.test.ts'
+            'test/role-manager.test.ts'
+            'test/roles.test.ts'
+            'test/session-store.test.ts'
+            'test/surface-role-services.test.ts'
+            'test/version-consistency.test.ts'
+          )
+          $tsxCli = node -p "require.resolve('tsx/cli')"
+          & node $tsxCli --test --test-concurrency=1 @tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows x64 installer
-        run: npx electron-builder --win nsis --x64 --publish never --config.directories.output=release
+        run: npm exec -- electron-builder --win nsis --x64 --publish never --config.directories.output=release
+
+      - name: Verify packaged app and launch Dashboard
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appRoot = Join-Path $PWD 'release/win-unpacked/resources/app'
+          $sourcePackage = Get-Content (Join-Path $PWD 'package.json') -Raw | ConvertFrom-Json
+          $package = Get-Content (Join-Path $appRoot 'package.json') -Raw | ConvertFrom-Json
+          if ($package.version -ne $sourcePackage.version) { throw "Unexpected packaged version: $($package.version)" }
+
+          $expectedRoles = @(
+            'browser-cat', 'engineer-cat', 'evolution-cat', 'gui-cat',
+            'inspector-cat', 'reviewer-cat', 'secretary-cat', 'user-cat'
+          )
+          $actualRoles = @(Get-ChildItem (Join-Path $appRoot 'roles') -Directory | ForEach-Object Name | Sort-Object)
+          if (Compare-Object $expectedRoles $actualRoles) { throw 'Packaged default role inventory is incomplete' }
+
+          $petRuntime = Get-Content (Join-Path $appRoot 'desktop/dashboard/pet-runtime.js') -Raw
+          if (-not $petRuntime.Contains('getProceduralData')) { throw 'Procedural XiaoBa renderer is missing' }
+          if (-not $petRuntime.Contains('custom role color palette exhausted')) { throw 'Unique custom-role color guard is missing' }
+          $legacySprites = @(Get-ChildItem (Join-Path $appRoot 'desktop/dashboard') -Recurse -File | Where-Object {
+            $_.Name -match 'sprite.*\.(png|gif|webp)$'
+          })
+          if ($legacySprites.Count -ne 0) { throw 'Legacy bitmap sprite assets remain in the package' }
+
+          function Assert-X64Pe([string] $Path) {
+            $bytes = [System.IO.File]::ReadAllBytes($Path)
+            if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) {
+              throw "$Path is not a PE executable"
+            }
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            if ($machine -ne 0x8664) { throw "$Path is not an x64 PE executable" }
+          }
+
+          $desktopExe = Join-Path $PWD 'release/win-unpacked/XiaoBa.exe'
+          Assert-X64Pe $desktopExe
+          $installer = Get-ChildItem release/XiaoBa-*-win.exe | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer was not produced' }
+          $env:XIAOBA_NODE_EXE = (Get-Command node).Source
+          $desktop = Start-Process -FilePath $desktopExe -PassThru
+          try {
+            $dashboardReady = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              Start-Sleep -Seconds 1
+              if ($desktop.HasExited) { throw "Packaged desktop exited early with code $($desktop.ExitCode)" }
+              try {
+                $response = Invoke-WebRequest 'http://127.0.0.1:3800/' -UseBasicParsing -TimeoutSec 2
+                if ($response.StatusCode -eq 200) {
+                  $dashboardReady = $true
+                  break
+                }
+              } catch {}
+            }
+            if (-not $dashboardReady) { throw 'Packaged Dashboard did not become reachable' }
+          } finally {
+            if (-not $desktop.HasExited) {
+              $null = $desktop.CloseMainWindow()
+              if (-not $desktop.WaitForExit(5000)) { Stop-Process -Id $desktop.Id -Force }
+            }
+          }
 
       - name: Verify installer and write checksum
         shell: pwsh
