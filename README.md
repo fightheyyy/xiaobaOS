@@ -10,13 +10,13 @@
   <em>像同事一样完成工作，像软件一样验收进化。</em>
 
   [![Release](https://img.shields.io/github/v/release/fightheyyy/xiaobaOS?include_prereleases&label=release)](https://github.com/fightheyyy/xiaobaOS/releases)
-  [![Desktop](https://img.shields.io/badge/desktop-macOS%20Apple%20Silicon-yellow.svg)](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1)
+  [![Desktop](https://img.shields.io/badge/desktop-macOS%20arm64%20%7C%20Windows%20x64-yellow.svg)](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.2)
   [![Node](https://img.shields.io/badge/CLI-Node.js%20%3E%3D18.19-green.svg)](package.json)
   [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-  [源码快速开始](#快速开始) · [macOS v0.2.1 Preview](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1) · [工作方式](#工作与进化) · [受控进化](#受控进化) · [English](README.en.md)
+  [源码快速开始](#快速开始) · [Desktop v0.2.2 Preview](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.2) · [工作方式](#工作与进化) · [受控进化](#受控进化) · [English](README.en.md)
 
-  <sub>v0.2.1 Preview 包含当前八角色与轻量 Assurance & Evolution 主线，面向 Apple Silicon（arm64）。该包采用 ad-hoc 签名、尚未完成 Apple notarization，桌面子服务仍需要系统 Node.js 18.19+。</sub>
+  <sub>v0.2.2 Preview 提供 macOS Apple Silicon（arm64）DMG 与 Windows x64 安装包，并包含程序化 XiaoBa 视觉系统、九个默认角色与轻量 Assurance & Evolution 主线。macOS 包采用 ad-hoc 签名且未 notarize，Windows 包未签名；桌面子服务仍需要系统 Node.js 18.19+。</sub>
 </div>
 
 ---
@@ -104,7 +104,7 @@ flowchart LR
 
 ## 快速开始
 
-> **macOS Desktop Preview**：可下载 [XiaoBa v0.2.1](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.1)。该 DMG 面向 Apple Silicon（arm64），包含当前八角色与轻量 Assurance & Evolution 主线；它采用 ad-hoc 签名、尚未 notarize，桌面启动的 CLI / Pet / IM 子服务需要系统 Node.js 18.19+。
+> **Desktop Preview**：可下载 [XiaoBa v0.2.2](https://github.com/fightheyyy/xiaobaOS/releases/tag/v0.2.2)。Release 同时提供 macOS Apple Silicon（arm64）DMG 与 Windows x64 安装包，包含程序化 XiaoBa 视觉系统及 Base + 八个默认 Role。macOS 包采用 ad-hoc 签名且未 notarize，Windows 安装包未签名；桌面启动的 CLI / Pet / IM 子服务需要系统 Node.js 18.19+。
 
 源码运行需要 Node.js 18.19 或更高版本：
 
@@ -239,6 +239,7 @@ xiaoba chat
 ## 当前边界
 
 - macOS Electron DMG 是 Apple Silicon arm64 Preview，采用 ad-hoc 签名且尚未 notarize。
+- Windows Electron 安装包面向 x64，当前未做代码签名，首次安装可能触发 SmartScreen 提示。
 - 桌面子服务不内嵌 Node，当前需要系统 Node.js 18.19 或更高版本；若 Finder 无法发现 Homebrew / nvm 的 Node，请用 `XIAOBA_NODE_EXE` 指向绝对可执行路径。
 - BrowserCat、GuiCat 和 SecretaryCat 依赖对应 driver / CLI，以及必要的安装、权限或登录状态；可先运行 `xiaoba doctor` 检查。
 - Preview 默认关闭尚未完成端到端验证的自动更新通道，新版本通过 GitHub Release 手动安装。

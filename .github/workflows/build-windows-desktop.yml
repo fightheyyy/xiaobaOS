@@ -1,0 +1,56 @@
+name: Build Windows desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Check out release commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install target-platform dependencies
+        run: npm ci --include=optional
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Run repository tests
+        run: npm test
+
+      - name: Build Windows x64 installer
+        run: npx electron-builder --win nsis --x64 --publish never --config.directories.output=release
+
+      - name: Verify installer and write checksum
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem release/XiaoBa-*-win.exe | Select-Object -First 1
+          if (-not $installer) { throw "Windows installer was not produced" }
+          $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content -Encoding ascii "$($installer.FullName).sha256"
+          Write-Host "Installer: $($installer.FullName)"
+          Write-Host "SHA256: $hash"
+
+      - name: Upload Windows release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaoba-windows-x64
+          path: |
+            release/XiaoBa-*-win.exe
+            release/XiaoBa-*-win.exe.sha256
+          if-no-files-found: error
+          retention-days: 7

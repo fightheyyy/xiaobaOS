@@ -1,7 +1,7 @@
 # Surface PLAN
 
 状态：Active
-最后更新：2026-08-27
+最后更新：2026-08-28
 Owner：Surface maintainers
 
 ## Current Status
@@ -13,6 +13,7 @@ Owner：Surface maintainers
 - Feishu/Pet runtime smoke 已覆盖文本、文件和 external receipt 基本形态。
 - Feishu Surface App ID 已作为 canonical application identity；SecretaryCat 按同 App ID 显式选择官方 `lark-cli` profile，不修改全局 active profile。
 - macOS Electron packaging maps the optional `@steipete/peekaboo@3.8.0` binary to GuiCat's fixed `resources/drivers/peekaboo/peekaboo` path.
+- Windows Electron packaging runs on a native Windows x64 GitHub runner so native Node dependencies are rebuilt for the target platform instead of being copied from macOS.
 - Dashboard、Pet 和 Bridge 的网络认证与 Owner 授权仍未闭合。
 - `evolution sleep` 与 schedule 已进入轻量 Evolution control；manual promote CLI 已删除。
 - Dashboard capability lifecycle API/UI 已删除；Role/Skill 卡片只保留选择、安装和删除 package。
@@ -46,6 +47,7 @@ flowchart LR
 16. Remove spritesheet compatibility：completed；legacy renderer、资源端点、内置旧宠物资产和对应发布/测试约定已删除。
 17. Remove legacy Dashboard avatars：completed；Role 卡片、当前角色徽标和侧栏品牌不再读取像素猫 PNG 或静态角色映射。
 18. Unique custom-role colors：completed；默认九色保持固定，自定义 Role 由完整已安装 inventory 统一分配不重复颜色，并供 Dashboard、Pet 与 Chat 共用；显式撞色会重分配，容量耗尽 fail closed。
+19. Native Windows desktop packaging：workflow implemented；first v0.2.2 NSIS artifact remains a release gate until the Windows runner completes successfully。
 
 ## Next Steps
 

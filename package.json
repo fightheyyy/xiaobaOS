@@ -1,6 +1,6 @@
 {
   "name": "xiaoba-cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "XiaoBa - 一个智能的AI对话助手CLI工具",
   "main": "desktop/electron/main.js",
   "bin": {
