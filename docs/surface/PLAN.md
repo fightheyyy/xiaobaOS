@@ -47,7 +47,7 @@ flowchart LR
 16. Remove spritesheet compatibility：completed；legacy renderer、资源端点、内置旧宠物资产和对应发布/测试约定已删除。
 17. Remove legacy Dashboard avatars：completed；Role 卡片、当前角色徽标和侧栏品牌不再读取像素猫 PNG 或静态角色映射。
 18. Unique custom-role colors：completed；默认九色保持固定，自定义 Role 由完整已安装 inventory 统一分配不重复颜色，并供 Dashboard、Pet 与 Chat 共用；显式撞色会重分配，容量耗尽 fail closed。
-19. Native Windows desktop packaging：workflow implemented；first v0.2.2 NSIS artifact remains a release gate until the Windows runner completes successfully。
+19. Native Windows desktop packaging：completed for the v0.2.2 Preview；native x64 dependencies、84/84 Surface release tests、packaged contract inspection、Dashboard launch smoke、NSIS generation and checksum verification passed on the Windows runner。
 
 ## Next Steps
 
@@ -91,7 +91,8 @@ flowchart LR
 - Conversation-focused tests pass 52/52 across Journal, shared surface wrapper,
   AgentSession, CLI, Feishu, Weixin, and Pet. A real Catena round trip preserved
   the two-message order and displayed only user-visible text/file content.
-- `npm test` passed 584/584 across 105 suites；`npm run build` passed。
+- v0.2.2 macOS release gate passed `npm run build`、569/569 repository tests across 105 suites、23/23 contract smoke cases and 11/11 scripted runtime cases；the arm64 DMG mounted read-only, passed deep code-signature validation, and contained Peekaboo 3.8.0 plus all eight default Roles。
+- v0.2.2 Windows run [33139372263](https://github.com/fightheyyy/xiaobaOS/actions/runs/33139372263) passed 84/84 desktop Surface tests, rebuilt native dependencies for Electron x64, verified all eight default Roles plus the procedural renderer and unique-color guard, rejected legacy bitmap sprites, launched the packaged x64 app, observed Dashboard HTTP readiness, built the NSIS installer, and reproduced SHA-256 `cadd63cf2fc1ea0a373faa941aa310466159d6fc9c2bb49c86b2f7f09dd4da58` after artifact download。
 - Surface diagrams reflect the lightweight Evolution CLI and shared Test/Eval activation path.
 - `electron-builder --mac --dir --publish never` passed with the platform-specific optional driver mapping.
 - The packaged Peekaboo binary is executable at `Contents/Resources/drivers/peekaboo/peekaboo` and reports version 3.8.0.

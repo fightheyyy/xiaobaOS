@@ -125,7 +125,9 @@ jobs:
           $installer = Get-ChildItem release/XiaoBa-*-win.exe | Select-Object -First 1
           if (-not $installer) { throw "Windows installer was not produced" }
           $hash = (Get-FileHash -Algorithm SHA256 $installer.FullName).Hash.ToLowerInvariant()
-          "$hash  $($installer.Name)" | Set-Content -Encoding ascii "$($installer.FullName).sha256"
+          $checksumPath = "$($installer.FullName).sha256"
+          $checksumLine = "$hash  $($installer.Name)`n"
+          [System.IO.File]::WriteAllText($checksumPath, $checksumLine, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Installer: $($installer.FullName)"
           Write-Host "SHA256: $hash"
 
