@@ -12,7 +12,8 @@ import { GuideTpcBaselineTool } from './guide/tools/tpc-baseline-tool';
 import { ResearchBoardReadTool, ResearchBoardUpdateTool } from './researcher-cat/tools/research-board-tools';
 import { ResearchAutoResearchRunTool } from './researcher-cat/tools/research-auto-run-tool';
 import { FeishuAuthLoginCompleteTool, FeishuAuthLoginStartTool, FeishuAuthStatusTool } from './secretary-cat/tools/feishu-auth-tools';
-import { DefaultLarkCliRunner } from './secretary-cat/utils/lark-cli-runner';
+import { FeishuConnector } from '../connectors/feishu';
+import { ConnectorRegistry } from '../connectors/connector';
 import {
   FeishuCalendarAgendaTool,
   FeishuCalendarCreateTool,
@@ -149,10 +150,11 @@ function getRoleSpecificToolsForNormalizedRole(normalizedRole: string): Tool[] {
     const surfaceAppId = String(
       process.env.FEISHU_APP_ID || ConfigManager.getConfig().feishu?.appId || '',
     ).trim();
-    const larkCli = new DefaultLarkCliRunner(
+    const connectors = new ConnectorRegistry();
+    const larkCli = connectors.register(new FeishuConnector(
       'lark-cli',
       surfaceAppId ? { ...process.env, FEISHU_APP_ID: surfaceAppId } : process.env,
-    );
+    ));
     return [
       new FeishuAuthStatusTool(larkCli),
       new FeishuAuthLoginStartTool(larkCli),

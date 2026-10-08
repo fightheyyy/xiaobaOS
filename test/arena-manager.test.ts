@@ -332,8 +332,8 @@ describe('ArenaManager', () => {
       const first = manager.prepareCleanRuntime(input);
       assert.ok(fs.statSync(path.join(first.roots.run_root, 'debug')).isDirectory());
       assert.ok(fs.statSync(path.join(first.roots.run_root, 'debug', 'provider-calls.ndjson')).isFile());
-      if (first.launch.sandbox_profile_path) {
-        const profile = fs.readFileSync(first.launch.sandbox_profile_path, 'utf-8');
+      if (first.launch.sandbox_policy_path) {
+        const profile = fs.readFileSync(first.launch.sandbox_policy_path, 'utf-8');
         assert.ok(profile.includes(fs.realpathSync.native(first.roots.run_root)));
       }
       const staleDebug = path.join(first.roots.run_root, 'debug', 'stale-replay.json');

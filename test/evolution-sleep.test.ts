@@ -317,8 +317,10 @@ describe('EvolutionCat nightly sleep', () => {
     assert.equal(first.installed, true);
     assert.equal(first.changed, true);
     assert.match(crontab.content, /5 1 \* \* \* \/usr\/bin\/other/);
-    assert.match(crontab.content, /17 3 \* \* \*/);
-    assert.match(crontab.content, /evolution sleep/);
+    assert.match(crontab.content, /\* \* \* \* \* /);
+    assert.equal(schedule.status().jobs[0].hour, 3);
+    assert.equal(schedule.status().jobs[0].minute, 17);
+    assert.match(crontab.content, /schedule tick/);
     assert.equal(schedule.install().changed, false);
     assert.equal(schedule.status().installed, true);
     const defaultStatusReader = new EvolutionSleepSchedule({

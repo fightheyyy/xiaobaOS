@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createSubAgentToolExecutor } from '../src/core/sub-agent-session';
+import { createSandboxPolicy } from '../src/sandbox/policy';
+import { sandboxExecutor } from '../src/sandbox/executor';
 import { ToolCall } from '../src/types/tool';
 
 describe('SubAgent execution boundaries', () => {
@@ -72,7 +74,7 @@ describe('SubAgent execution boundaries', () => {
       file_path: 'candidates/ok.txt',
       content: 'candidate',
     }));
-    assert.equal(allowed.status, 'success');
+    assert.equal(allowed.status, 'success', JSON.stringify(allowed));
     assert.equal(fs.readFileSync(path.join(candidateRoot, 'ok.txt'), 'utf-8'), 'candidate');
 
     const deniedPaths = [
@@ -94,7 +96,7 @@ describe('SubAgent execution boundaries', () => {
     assert.equal(fs.existsSync(path.join(outsideRoot, 'symlink.txt')), false);
   });
 
-  test('ordinary subagents keep existing write semantics when allowedWriteRoot is omitted', async () => {
+  test('ordinary subagents now keep writes within their SDK workspace', async () => {
     const runRoot = path.join(root, 'ordinary-run');
     fs.mkdirSync(runRoot, { recursive: true });
     const executor = createSubAgentToolExecutor(runRoot, 'ordinary-write');
@@ -104,8 +106,8 @@ describe('SubAgent execution boundaries', () => {
       content: 'ordinary role behavior',
     }));
 
-    assert.equal(result.status, 'success');
-    assert.equal(fs.readFileSync(path.join(root, 'ordinary.txt'), 'utf-8'), 'ordinary role behavior');
+    assert.notEqual(result.status, 'success');
+    assert.equal(fs.existsSync(path.join(root, 'ordinary.txt')), false);
   });
 
   test('allowedWriteRoot confines shell writes to the isolated root', async () => {
@@ -120,12 +122,13 @@ describe('SubAgent execution boundaries', () => {
     const allowed = await executor.executeTool(toolCall('execute_shell', {
       command: 'touch shell-allowed.txt',
     }));
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) {
+    const probe = await sandboxExecutor.probe(createSandboxPolicy({ cwd: runRoot, scratchRoot: path.join(runRoot, 'probe') }));
+    if (!probe.available) {
       assert.equal(allowed.status, 'blocked');
-      assert.equal(allowed.error_code, 'WRITE_SANDBOX_UNAVAILABLE');
+      assert.equal(allowed.error_code, 'SANDBOX_UNAVAILABLE');
       return;
     }
-    assert.equal(allowed.status, 'success');
+    assert.equal(allowed.status, 'success', JSON.stringify(allowed));
     assert.equal(fs.existsSync(path.join(runRoot, 'shell-allowed.txt')), true);
 
     const escaped = await executor.executeTool(toolCall('execute_shell', {

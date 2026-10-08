@@ -19,7 +19,7 @@ function report(ready: boolean): ReadinessReport {
     app: {
       name: 'xiaoba-cli',
       version: '0.2.0',
-      nodeVersion: 'v20.18.1',
+      nodeVersion: 'v24.19.0',
       platform: 'darwin',
       arch: 'arm64',
     },

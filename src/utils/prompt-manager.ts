@@ -216,7 +216,6 @@ export class PromptManager {
       ? (ActiveRoleContext.getRoleConfig(roleName)?.displayName || roleName)
       : '';
     const platform = process.env.CURRENT_PLATFORM || '';
-    const today = new Date().toISOString().slice(0, 10);
     const runtimeEnvironmentInfo = this.getRuntimeEnvironmentInfo();
 
     // 动态生成工作空间路径
@@ -227,12 +226,18 @@ export class PromptManager {
       displayName ? `你在这个平台上的名字是：${displayName}` : '',
       roleName ? `当前角色：${roleDisplayName}` : '',
       platform ? `当前平台：${platform}` : '',
-      `当前日期：${today}`,
+      this.getCurrentTimeInfo(),
       `你的默认工作目录是：\`${workspacePath}\``,
       ...runtimeEnvironmentInfo,
     ].filter(Boolean).join('\n');
 
     return [basePrompt, behaviorPrompt, runtimeInfo].filter(Boolean).join('\n\n');
+  }
+
+  /** Refresh on every request; durable sessions can live across local midnight. */
+  static getCurrentTimeInfo(now = new Date()): string {
+    const localTime = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(now);
+    return `当前日期：${localTime.slice(0, 10)}\n当前时间：${localTime}（Asia/Shanghai，UTC+08:00）；UTC 时间：${now.toISOString()}。定时工具需要带时区的绝对时间。`;
   }
 
   /**

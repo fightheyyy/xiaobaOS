@@ -1,3 +1,5 @@
+import { sandboxExecutor } from '../src/sandbox/executor';
+import { createSandboxPolicy } from '../src/sandbox/policy';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -163,7 +165,8 @@ describe('EngineerCat Source Candidate', () => {
       out_dir: path.join(root, 'output', 'evolution', 'test'),
     });
 
-    if (process.platform === 'darwin' && fs.existsSync('/usr/bin/sandbox-exec')) {
+    const probe = await sandboxExecutor.probe(createSandboxPolicy({ cwd: root, scratchRoot: path.join(root, 'probe') }));
+    if (probe.available) {
       const diagnostic = result.evidence_refs
         .filter(ref => fs.existsSync(ref))
         .map(ref => `${ref}\n${fs.readFileSync(ref, 'utf-8')}`)
@@ -175,7 +178,7 @@ describe('EngineerCat Source Candidate', () => {
       );
     } else {
       assert.equal(result.status, 'blocked');
-      assert.match(result.reasons.join('\n'), /native sandbox/);
+      assert.match(result.reasons.join('\n'), /sandbox|Sandbox/);
     }
   });
 });

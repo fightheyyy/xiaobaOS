@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { sandboxSdkAgent } from './sandbox-proxy';
 import { Message, ChatConfig, ChatResponse, ContentBlock } from '../types';
 import { ToolDefinition } from '../types/tool';
-import { AIProvider, StreamCallbacks } from './provider';
+import { AIProvider, StreamCallbacks, ProviderCallOptions } from './provider';
 import { ContextDebugLogger } from '../utils/context-debug-logger';
 import { arenaLiveAuditEnabled } from '../arena/live-audit';
 
@@ -17,6 +18,7 @@ export class AnthropicProvider implements AIProvider {
 
   constructor(config: ChatConfig) {
     this.client = new Anthropic({
+      ...sandboxSdkAgent(),
       apiKey: config.apiKey!,
       baseURL: this.normalizeBaseURL(config.apiUrl!),
       timeout: 10 * 60 * 1000, // 10 分钟，Opus 长输出需要足够时间
@@ -231,7 +233,7 @@ export class AnthropicProvider implements AIProvider {
   /**
    * 普通调用
    */
-  async chat(messages: Message[], tools?: ToolDefinition[]): Promise<ChatResponse> {
+  async chat(messages: Message[], tools?: ToolDefinition[], options?: ProviderCallOptions): Promise<ChatResponse> {
     const { system, messages: transformed } = this.transformMessages(messages);
 
     const params: Anthropic.MessageCreateParamsNonStreaming = {
@@ -244,14 +246,14 @@ export class AnthropicProvider implements AIProvider {
     if (system) params.system = system;
     if (tools && tools.length > 0) params.tools = this.transformTools(tools);
 
-    const response = await this.client.messages.create(params);
+    const response = await this.client.messages.create(params, { signal: options?.abortSignal });
     return this.parseResponse(response);
   }
 
   /**
    * 流式调用
    */
-  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks): Promise<ChatResponse> {
+  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks, options?: ProviderCallOptions): Promise<ChatResponse> {
     const { system, messages: transformed } = this.transformMessages(messages);
 
     const params: Anthropic.MessageCreateParamsStreaming = {
@@ -272,7 +274,7 @@ export class AnthropicProvider implements AIProvider {
         params
       });
 
-      const stream = this.client.messages.stream(params);
+      const stream = this.client.messages.stream(params, { signal: options?.abortSignal });
 
       // 逐 token 回调文本
       stream.on('text', (text) => {

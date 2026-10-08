@@ -1,3 +1,6 @@
+import { createSandboxPolicy } from '../sandbox/policy';
+import { buildArenaShellCommand } from './arena-shell';
+import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -473,33 +476,31 @@ export class ArenaManager {
       tmpRoot: roots.tmp_root,
     });
     const command = buildLaunchCommand(this.projectRoot, targetProfile.active_role_id);
-    const sandboxProfilePath = sandbox.engine === 'macos_seatbelt'
-      ? writeMacSeatbeltProfile({
+    const sandboxPolicyPath = writeSdkSandboxPolicy({
         runRoot,
         projectRoot: this.projectRoot,
         roots,
         sandbox,
-      })
-      : undefined;
+      });
     const launch = {
       cwd: roots.workspace_root,
       command,
       env: launchEnv,
       pass_through_env: passThroughEnv,
-      shell_command: buildShellCommand({
+      shell_command: buildArenaShellCommand({
         cwd: roots.workspace_root,
         command,
         env: launchEnv,
         passThroughEnv,
       }),
-      ...(sandboxProfilePath && {
-        sandbox_profile_path: sandboxProfilePath,
-        sandbox_shell_command: buildShellCommand({
+      ...(sandboxPolicyPath && {
+        sandbox_policy_path: sandboxPolicyPath,
+        sandbox_shell_command: buildArenaShellCommand({
           cwd: roots.workspace_root,
           command,
           env: launchEnv,
           passThroughEnv,
-          sandboxProfilePath,
+          sandboxPolicyPath,
         }),
       }),
     };
@@ -669,7 +670,7 @@ export class ArenaManager {
     const subjectRoot = subject.source.path || path.dirname(this.resolveSubjectManifestPath(subject.subject_id));
     const workspaceRoot = override?.workspace_root || path.join(this.getRunsRoot(), '.workspaces', subject.subject_id);
     return {
-      engine: override?.engine || defaultSandboxEngine(),
+      engine: 'anthropic_sdk',
       mode: override?.mode || subject.default_sandbox.mode,
       workspace_root: workspaceRoot,
       subject_root: override?.subject_root || subjectRoot,
@@ -796,6 +797,7 @@ function buildCleanRuntimeEnv(input: {
     HOME: input.homeRoot,
     TMPDIR: input.tmpRoot,
     NO_COLOR: '1',
+    PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
     ...(dotenvPath && { DOTENV_CONFIG_PATH: dotenvPath }),
   };
 }
@@ -824,89 +826,25 @@ function buildLaunchCommand(projectRoot: string, activeRoleId?: string): string[
   return command;
 }
 
-function buildShellCommand(input: {
-  cwd: string;
-  command: string[];
-  env: Record<string, string>;
-  passThroughEnv: string[];
-  sandboxProfilePath?: string;
+function writeSdkSandboxPolicy(input: {
+  runRoot: string; projectRoot: string; roots: ArenaCleanRuntimeIndex['roots']; sandbox: ArenaSandboxPolicy;
 }): string {
-  const env = input.sandboxProfilePath
-    ? { ...input.env, XIAOBA_ARENA_SANDBOXED: '1' }
-    : input.env;
-  const envParts = Object.entries(env)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${shellQuote(value)}`);
-  for (const envName of input.passThroughEnv) {
-    envParts.push(`${envName}="\${${envName}}"`);
-  }
-  const commandParts = input.command.map(shellQuote);
-  const spawnCommand = ['env', '-i', ...envParts, ...commandParts].join(' ');
-  const wrappedCommand = input.sandboxProfilePath
-    ? ['sandbox-exec', '-f', shellQuote(input.sandboxProfilePath), spawnCommand].join(' ')
-    : spawnCommand;
-  return `cd ${shellQuote(input.cwd)} && ${wrappedCommand}`;
-}
-
-function writeMacSeatbeltProfile(input: {
-  runRoot: string;
-  projectRoot: string;
-  roots: ArenaCleanRuntimeIndex['roots'];
-  sandbox: ArenaSandboxPolicy;
-}): string {
-  const sandboxDir = path.join(input.runRoot, 'sandbox');
-  ensureDir(sandboxDir);
-  const profilePath = path.join(sandboxDir, 'macos-seatbelt.sb');
-  const readRoots = uniqueExistingPaths([
-    input.projectRoot,
-    input.runRoot,
-    path.dirname(process.execPath),
-    '/dev',
-    '/System',
-    '/Library',
-    '/usr',
-    '/bin',
-    '/sbin',
-    '/etc',
-    '/private/etc',
-    '/private/var/db/timezone',
-    '/var/db/timezone',
-    '/opt/homebrew',
-  ]);
-  const writeRoots = uniqueExistingPaths([
-    input.runRoot,
-    input.roots.home_root,
-    input.roots.workspace_root,
-    input.roots.tmp_root,
-  ]);
-  const readRules = readRoots
-    .map(root => `(allow file-read* (subpath ${seatbeltString(root)}))`)
-    .join('\n');
-  const writeRules = writeRoots
-    .map(root => `(allow file-write* (subpath ${seatbeltString(root)}))`)
-    .join('\n');
-  // The Pet/Chat entrypoint starts a loopback HTTP server. Seatbelt's granular
-  // loopback filters are inconsistent for Node bind(127.0.0.1), so Arena's
-  // macOS profile treats network as a cleanliness boundary in metadata while
-  // allowing process-local networking for the real product surface.
-  const networkRule = '(allow network*)';
-  const profile = [
-    '(version 1)',
-    '(deny default)',
-    '(allow process*)',
-    '(allow mach-lookup)',
-    '(allow sysctl*)',
-    '(allow file-map-executable)',
-    '(allow file-read-metadata)',
-    '(allow file-read*)',
-    '(allow file-write-data (subpath "/dev"))',
-    readRules,
-    writeRules,
-    networkRule,
-    '',
-  ].filter(Boolean).join('\n');
-  fs.writeFileSync(profilePath, profile, 'utf-8');
-  return profilePath;
+  const policyPath = path.join(input.runRoot, 'sandbox', 'anthropic-policy.json');
+  const envPath = resolveArenaDotenvPath(input.projectRoot);
+  const environment = { ...(envPath ? dotenv.parse(fs.readFileSync(envPath)) : {}), ...process.env };
+  const domains = Object.entries(environment).filter(([key]) => /^XIAOBA_LLM_.*API_BASE$/.test(key)).flatMap(([, value]) => {
+    try { return value ? [new URL(value).hostname] : []; } catch { return []; }
+  });
+  const policy = createSandboxPolicy({
+    cwd: input.roots.workspace_root, scratchRoot: path.join(input.runRoot, 'sandbox'),
+    readRoots: [input.runRoot, ...['dist', 'src', 'node_modules', 'prompts', 'roles', 'skills', 'package.json', 'skill-registry.json'].map(name => path.join(input.projectRoot, name))], writeRoots: [input.runRoot, ...input.sandbox.writable_roots],
+    denyRead: [path.join(input.projectRoot, 'data'), path.join(input.projectRoot, 'memory'), path.join(input.projectRoot, 'logs')],
+    denyWrite: [input.projectRoot + '/src', input.projectRoot + '/dist', input.projectRoot + '/roles', input.projectRoot + '/skills', input.projectRoot + '/data', input.projectRoot + '/memory'],
+    allowedDomains: [...domains, 'api.openai.com', 'api.anthropic.com'], allowLocalBinding: true,
+  });
+  policy.config.filesystem.denyWrite.push({ path: policyPath, literal: true });
+  writeJson(policyPath, policy);
+  return policyPath;
 }
 
 function normalizeEnvNames(values: string[]): string[] {
@@ -914,24 +852,6 @@ function normalizeEnvNames(values: string[]): string[] {
     .map(value => value.trim())
     .filter(value => /^[A-Za-z_][A-Za-z0-9_]*$/.test(value));
   return Array.from(new Set(names)).sort();
-}
-
-function uniqueExistingPaths(values: string[]): string[] {
-  const paths = new Set<string>();
-  for (const value of values) {
-    const resolved = path.resolve(value);
-    if (!fs.existsSync(resolved)) continue;
-    paths.add(resolved);
-    // macOS exposes /var as a symlink to /private/var. Seatbelt evaluates the
-    // kernel-resolved path, so scratch roots need both spellings while still
-    // referring to the exact same filesystem subtree.
-    paths.add(fs.realpathSync.native(resolved));
-  }
-  return [...paths];
-}
-
-function seatbeltString(value: string): string {
-  return `"${path.resolve(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 function shellQuote(value: string): string {
@@ -1000,12 +920,7 @@ function defaultSandboxForTrust(trustLevel: ArenaTrustLevel): ArenaDefaultSandbo
   };
 }
 
-function defaultSandboxEngine(): ArenaSandboxPolicy['engine'] {
-  if (process.platform === 'darwin') return 'macos_seatbelt';
-  if (process.platform === 'linux') return 'linux_bubblewrap';
-  if (process.platform === 'win32') return 'windows_native';
-  return 'none';
-}
+function defaultSandboxEngine(): ArenaSandboxPolicy['engine'] { return 'anthropic_sdk'; }
 
 function collectRoleLocalSkillNames(rolePath: string): string[] {
   return PathResolver.findSkillFiles(path.join(rolePath, 'skills'))

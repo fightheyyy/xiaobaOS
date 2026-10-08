@@ -1,3 +1,4 @@
+import { DailyEventScheduler } from '../events';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
@@ -87,44 +88,18 @@ export function registerEvolutionCommand(
         return;
       }
 
-      if (!options.worker && !dependencies.runWorkflow) {
-        const runWorker = dependencies.runWorker || runEvolutionSleepWorker;
-        await runWorker({
-          workingDirectory: process.cwd(),
-          targetDate,
-          minOccurrences,
-          runsPerCase,
-          verbose: options.verbose === true,
-        });
-        return;
+      const request: EvolutionSleepWorkerRequest = {
+        workingDirectory: process.cwd(), targetDate, minOccurrences, runsPerCase,
+        verbose: options.verbose === true,
+      };
+      if (options.worker) {
+        // Internal worker is already owned by the admitted Event; never re-admit recursively.
+        await executeEvolutionSleepWorkflow(request, dependencies, true);
+      } else {
+        const scheduler = new DailyEventScheduler(request.workingDirectory);
+        scheduler.register('evolution', event => consumeEvolutionSleep(event.payload as EvolutionSleepWorkerRequest, dependencies));
+        await scheduler.dispatch('evolution', request);
       }
-
-      await withEvolutionSleepLock(process.cwd(), async () => {
-        const runWorkflow = dependencies.runWorkflow || runEvolutionSleep;
-        const execution = await runWorkflow({
-          workingDirectory: process.cwd(),
-          targetDate,
-          minOccurrences,
-          runsPerCase,
-          verbose: options.verbose === true,
-        });
-        const attempts = execution.result.attempts;
-        const activated = attempts.filter(attempt => attempt.activated).length;
-        const ok = activated === attempts.length;
-        printJson({
-          ok,
-          mode: 'evolution',
-          run_id: execution.result.evolution_run_id,
-          status: attempts.length === 0 ? 'no_op' : ok ? 'completed' : 'blocked',
-          attempts: attempts.length,
-          activated,
-          result_path: displayPath(execution.result_path),
-          digest_path: displayPath(execution.digest_path),
-        });
-        if (options.worker && !ok) {
-          process.exitCode = 1;
-        }
-      });
     });
 
   const schedule = evolution
@@ -134,8 +109,9 @@ export function registerEvolutionCommand(
   schedule
     .command('install')
     .option('--hour <n>', 'local hour (0-23)', '3')
-    .option('--minute <n>', 'local minute (0-59)', '17')
-    .action((options: { hour: string; minute: string }) => {
+    .option('--minute <n>', 'minute (0-59)', '17')
+    .option('--timezone <zone>', 'schedule timezone', 'Asia/Shanghai')
+    .action((options: { hour: string; minute: string; timezone?: string }) => {
       const scheduler = createSchedule(options);
       printJson({ ok: true, action: 'install', ...scheduler.install() });
     });
@@ -153,6 +129,41 @@ export function registerEvolutionCommand(
       const scheduler = createSchedule({ hour: '3', minute: '17' });
       printJson({ ok: true, action: 'remove', ...scheduler.remove() });
     });
+}
+
+export async function consumeEvolutionSleep(request: EvolutionSleepWorkerRequest, dependencies: EvolutionCommandDependencies = {}): Promise<void> {
+  if (dependencies.runWorkflow) await executeEvolutionSleepWorkflow(request, dependencies, false);
+  else await (dependencies.runWorker || runEvolutionSleepWorker)(request);
+}
+
+async function executeEvolutionSleepWorkflow(request: EvolutionSleepWorkerRequest, dependencies: EvolutionCommandDependencies, worker: boolean): Promise<void> {
+  await withEvolutionSleepLock(request.workingDirectory, async () => {
+    const runWorkflow = dependencies.runWorkflow || runEvolutionSleep;
+    const execution = await runWorkflow({
+      workingDirectory: request.workingDirectory,
+      targetDate: request.targetDate,
+      minOccurrences: request.minOccurrences,
+      runsPerCase: request.runsPerCase,
+      verbose: request.verbose,
+    });
+    const attempts = execution.result.attempts;
+    const activated = attempts.filter(attempt => attempt.activated).length;
+    const ok = activated === attempts.length;
+    printJson({
+      ok,
+      mode: 'evolution',
+      run_id: execution.result.evolution_run_id,
+      status: attempts.length === 0 ? 'no_op' : ok ? 'completed' : 'blocked',
+      attempts: attempts.length,
+      activated,
+      result_path: displayPath(execution.result_path),
+      digest_path: displayPath(execution.digest_path),
+    });
+    if (!ok) {
+      if (worker) process.exitCode = 1;
+      else throw new Error('EVOLUTION_SLEEP_BLOCKED');
+    }
+  });
 }
 
 export async function runEvolutionSleepWorker(request: EvolutionSleepWorkerRequest): Promise<void> {
@@ -263,9 +274,10 @@ function isSupervisedProcessGroupAlive(pid: number | undefined): boolean {
   }
 }
 
-function createSchedule(options: { hour: string; minute: string }): EvolutionSleepSchedule {
+function createSchedule(options: { hour: string; minute: string; timezone?: string }): EvolutionSleepSchedule {
   return new EvolutionSleepSchedule({
     workingDirectory: process.cwd(),
+    timezone: options.timezone,
     hour: parseInteger(options.hour, 'hour'),
     minute: parseInteger(options.minute, 'minute'),
   });

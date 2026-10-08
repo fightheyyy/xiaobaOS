@@ -1,7 +1,7 @@
 # Observability & Evidence PLAN
 
 状态：Active
-最后更新：2026-08-06
+最后更新：2026-10-08
 Owner：Runtime / evidence maintainers
 
 ## Current Status
@@ -47,6 +47,15 @@ flowchart LR
 10. XiaoBaOS Conversation Journal + Catena HTTPS export：completed for CLI、Feishu、Weixin、Pet current-message paths。
 11. Barena one-shot W3C parent propagation：completed for `xiaoba chat --message` through `TRACEPARENT`。
 
+## File-system memory migration
+
+- Owner: Runtime with Observability & Evidence for Markdown layout.
+- Completed: bounded per-request index loading, role-owned replacement/forget,
+  preservation of manual Markdown and non-resurrection after archive.
+- Acceptance: a new Session instance sees saved preferences; unrelated sessions
+  stay isolated; manual edits refresh; memory is absent from stored transcript.
+- Next: observe session-scoped task follow-ups; cross-surface person binding is out of scope.
+
 ## Next Steps
 
 - Move remaining direct metric writers behind session-log projection or explicit standalone mode.
@@ -83,6 +92,13 @@ flowchart LR
 
 ## Recent Verification
 
+- 2026-10-08: build passed; file-memory/runtime/Role focused tests passed 33/33;
+  repository regression passed 591/592. The sole failure remains the existing
+  Evolution descendant-process timeout assertion in this cloud container.
+  Coverage proves fresh Session recall, edit refresh, root consistency, bounded
+  and scoped reads, correction/forget, archive exclusion, legacy Markdown upgrade,
+  managed-block integrity and non-persistence of injected memory.
+
 - `npm run build` and `npm test` 575/575 across 104 suites pass after the
   Conversation slice. Focused Journal/surface/CLI/Feishu/Weixin/Pet coverage
   passes 52/52, including concurrent sequence allocation, idempotency,
@@ -101,3 +117,35 @@ flowchart LR
 - Full repository tests pass 576/576 across 104 suites；`npm run build` passes.
 - Deterministic harvest tests cover timestamp windows across date directories, malformed/non-terminal rows, test/replay/self-run exclusion, runtime-stamped custom replay provenance, stable observation ids and atomic reruns.
 - Real harvest for `2026-07-13` scanned 124 trace files, excluded 44 synthetic/replay rows and correctly returned 0 production observations / 0 patterns.
+
+## Proactive memory maintenance
+
+Owner: Evidence. Completed: private Journal target registry, 256 KB incremental windows, cursor and source-boundary checks, single active-index batch write, archive-first retention, suppression, failed Event receipts and shared job/day admission. Acceptance verified: new appends are deferred, malformed proposal/failure never advances progress, concurrent edits win, archives are not automatically recalled, scoped histories never mix. Next: install cron and inspect real maintenance traces; old sessions register when next used. Risks: boundary hashes assume append-only history, semantic paraphrases need Agent judgment, interrupted locks require process inspection. Verification: build, focused 39/39 and isolated Pet 18/18 passed; full regression retry passed 605/606; only the previously known Evolution descendant-process SIGKILL assertion fails in this cloud container. The initial run also hit the known Node 24 test IPC flake; isolated Pet passed 18/18 and that failure disappeared on the full retry.
+
+## Shared scheduled events
+
+Owner: Evidence. Completed: schedule config in data/scheduler, daily Event receipts in data/events, memory source progress remains separate; old memory .attempt files are no longer used. Scheduled failure/running state is retained for inspection, manual retry uses a fresh runtime Event. Acceptance: progress never advances on failed memory apply; no duplicate daily execution across restarts/DST; failed Evolution does not block Memory. Focused 45/46; full regression 615/616, with only the existing cloud descendant-process SIGKILL assertion failing.
+
+Scope decision: continuity and memory remain scoped by sessionKey. Cross-surface person linking is explicitly out of scope; future follow-up work reuses that boundary.
+
+## Session timed wakeups
+
+Owner: Evidence. Completed: private atomic reminder records, owner-scoped capacity, per-record mutation/delivery locks, revision-based session.wakeup.due Events, no blind failed/interrupted replay, bounded Tool listing. Verified invalid time/ID rejection, immutable owner, restart restoration, cancellation/reschedule, concurrent scans, failed delivery and explicit retry. Next: record-retention policy and optional management UI; crashes need process/remote-delivery inspection before recovery. Build and focused 47/47 passed; full regression 630/631 passed; the sole failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion.
+
+## Agent-owned app connections
+
+Owner: Evidence. Completed: Agent config version 1, private atomic writes/locks, environment references only, no session-owned credentials, bounded/redacted public outputs and existing ToolResult/trace integration. The private Agent credential source is implemented below; next is subscription progress evidence when those subscriptions exist.
+
+Verification: TypeScript build and focused native connector / Feishu boundary / role-tool tests 39/39 passed, including real AgentSession confirmed-write execution with mocked official HTTP. Full regression 650/651 passed; the only failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion. Live app accounts are not yet verified.
+
+
+## Dashboard connection management
+
+Owner: Evidence. Completed: Agent-owned private credential file, strict finite schema/size bounds, directory 0700/file 0600, exclusive write lock, atomic rename, write-only API and file-first/environment-fallback credential provider. New and running runtimes share saved authorization; config still stores references/enabled state only. Changed Google client discards old refresh authorization. Offline refresh token is persisted; OAuth access token/code are not. The local credential file is not encryption or a hostile-tenant sandbox.
+
+Verified save/read/restart behavior, private file permissions, malformed-state denial, secret-free status/config responses, cancellation/expiry/replay/client-change/disconnect races and existing transcript redaction. Build and focused 34/34 passed, Chromium UI flows passed with simulated providers, full regression 658/659 passed (existing cloud Evolution process-group assertion only). Next: real account verification and optional OS credential storage when needed; no new chat credential tool or subscription store.
+
+
+Dashboard simplification: completed. Three authorization-only cards reuse existing Skills/Store components and the shared modal/config fields; no requester/scope/Feishu/control panel remains. Token connection and Google callback verify accounts automatically. All configured/enabled app operations are available by default to valid main sessions; retired grants are ignored/removed on the next write. Google OAuth covers all implemented mail operations through gmail.modify. Write confirmation and existing role/child boundaries remain intact.
+
+Verification: build and focused 50/50 passed, including cross-surface default reads/writes, old-config migration, retired API absence and exact write-confirmation tests. Real Chromium validated shared computed card styles, token/OAuth connection, all-operation defaults, disconnect, mobile modal and Electron renderer external authorization with mocked providers and no page errors. Full regression 658/659 passed; the sole failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion. Real provider credentials/consent and native OS browser launch remain user-host checks.

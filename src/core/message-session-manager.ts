@@ -1,4 +1,6 @@
-import { AgentSession, AgentServices } from './agent-session';
+import { registerReminderRoute, startReminderPolling, reminderCheckMessage, SessionReminder } from '../events';
+import type { ChannelCallbacks } from '../types/tool';
+import { BUSY_MESSAGE, AgentSession, AgentServices } from './agent-session';
 import { Logger } from '../utils/logger';
 
 /** 默认会话过期时间：60 分钟 */
@@ -26,6 +28,9 @@ export class MessageSessionManager {
   private destroying = new Set<string>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private ttl: number;
+  private reminderChannelFactory?: (record: SessionReminder) => Promise<ChannelCallbacks> | ChannelCallbacks;
+  private stopReminderPoll?: () => void;
+  private unregisterReminderRoute?: () => void;
   /** 记录每个 session 最近一次消息的通道 ID（topic/chatId，用于过期时主动唤醒） */
   private lastChannelIdMap = new Map<string, string>();
   private wakeupSendFn: WakeupSendFn | null = null;
@@ -85,6 +90,33 @@ export class MessageSessionManager {
     return session;
   }
 
+  setReminderChannelFactory(factory: (record: SessionReminder) => Promise<ChannelCallbacks> | ChannelCallbacks): void {
+    this.reminderChannelFactory = factory;
+  }
+
+  startReminderProcessing(): void {
+    if (this.stopReminderPoll || !this.reminderChannelFactory) return;
+    const root = this.agentServices.toolManager?.getWorkingDirectory?.() || process.cwd();
+    this.unregisterReminderRoute = registerReminderRoute(root, this.sessionType, {
+      available: record => !this.sessions.get(record.sessionKey)?.isBusy() && !this.destroying.has(record.sessionKey),
+      consume: async record => {
+        const channel = await this.reminderChannelFactory!(record);
+        const session = this.getOrCreate(record.sessionKey, record.channelId);
+        if (record.mode === 'remind') {
+          await channel.reply(record.channelId, record.purpose);
+          session.injectContext(`[scheduled_reminder_delivered] ${record.id}: ${record.purpose}`);
+        } else {
+          const result = await session.handleMessage(reminderCheckMessage(record), {
+            surface: record.surface, channel,
+          });
+          if (result.text === BUSY_MESSAGE || result.failed) throw new Error('REMINDER_SESSION_RUN_FAILED');
+          if (result.finalResponseVisible && result.text) await channel.reply(record.channelId, result.text);
+        }
+      },
+    });
+    this.stopReminderPoll = startReminderPolling(root, error => Logger.warning(`定时唤醒失败: ${String(error)}`));
+  }
+
   injectContext(key: string, text: string, channelId?: string): void {
     const session = this.getOrCreate(key, channelId);
     session.injectContext(text);
@@ -124,6 +156,8 @@ export class MessageSessionManager {
 
   /** 停止清理定时器并保存所有会话 */
   async destroy(): Promise<void> {
+    this.stopReminderPoll?.();
+    this.unregisterReminderRoute?.();
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;

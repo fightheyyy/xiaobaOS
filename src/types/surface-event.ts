@@ -1,4 +1,4 @@
-export type NormalizedSurfaceName = 'feishu' | 'pet';
+export type NormalizedSurfaceName = 'cli' | 'feishu' | 'weixin' | 'pet';
 
 export interface NormalizedSurfaceEvent {
   surface: NormalizedSurfaceName;

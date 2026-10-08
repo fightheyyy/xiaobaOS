@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, dialog, shell } = require('electron');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -83,7 +83,7 @@ function getNodeExePath() {
     ...pathCandidates,
     ...(process.platform === 'darwin' ? ['/opt/homebrew/bin/node', '/usr/local/bin/node'] : []),
   ].filter(Boolean);
-  const requiredMajor = getRequiredNodeMajor();
+  const requiredVersion = getRequiredNodeVersion();
 
   for (const candidate of [...new Set(candidates)]) {
     const resolved = path.resolve(candidate);
@@ -93,23 +93,24 @@ function getNodeExePath() {
         encoding: 'utf8',
         timeout: 3000,
       })).trim();
-      const major = Number.parseInt(version.replace(/^v/, '').split('.')[0] || '', 10);
-      if (Number.isFinite(major) && major >= requiredMajor) {
+      const actual = version.replace(/^v/, '').split('.').map(Number);
+      const sufficient = actual[0] > requiredVersion[0] || actual[0] === requiredVersion[0] && (actual[1] > requiredVersion[1] || actual[1] === requiredVersion[1] && actual[2] >= requiredVersion[2]);
+      if (sufficient) {
         return resolved;
       }
     } catch {}
   }
 
-  console.warn(`Node.js ${requiredMajor}+ was not resolved for desktop child services. Set XIAOBA_NODE_EXE to an absolute executable path.`);
+  console.warn(`Node.js ${requiredVersion.join('.')}+ was not resolved for desktop child services. Set XIAOBA_NODE_EXE to an absolute executable path.`);
   return 'node';
 }
 
-function getRequiredNodeMajor() {
+function getRequiredNodeVersion() {
   try {
-    const engine = require(path.join(getAppRoot(), 'package.json')).engines?.node || '>=18.0.0';
-    return Number.parseInt(String(engine).match(/\d+/)?.[0] || '18', 10);
+    const engine = require(path.join(getAppRoot(), 'package.json')).engines?.node || '>=22.12.0';
+    return String(engine).match(/(\d+)\.(\d+)\.(\d+)/).slice(1).map(Number);
   } catch {
-    return 18;
+    return [22, 12, 0];
   }
 }
 
@@ -320,6 +321,17 @@ function createWindow(page) {
       nodeIntegration: false,
       contextIsolation: true,
     },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const target = new URL(url);
+      if (target.origin === 'https://accounts.google.com' && target.pathname === '/o/oauth2/v2/auth') {
+        void shell.openExternal(target.toString()).catch(() => {});
+        return { action: 'deny' };
+      }
+    } catch {}
+    return { action: 'allow' };
   });
 
   mainWindow.loadURL(getDashboardUrl(page));

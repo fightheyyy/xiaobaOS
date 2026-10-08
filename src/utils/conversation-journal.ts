@@ -1,3 +1,4 @@
+import { registerMemoryTarget } from './memory-target';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -220,6 +221,7 @@ export class ConversationJournal {
       return { message, created: true };
     });
 
+    registerMemoryTarget(this.workingDirectory, { surface, sessionKey });
     if (localResult.created) void this.exportMessage(localResult.message);
     return localResult;
   }

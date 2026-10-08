@@ -1,3 +1,4 @@
+import { SubAgentJournal } from './sub-agent-journal';
 import { AIService } from '../utils/ai-service';
 import { SkillManager } from '../skills/skill-manager';
 import { Logger } from '../utils/logger';
@@ -89,7 +90,7 @@ export class SubAgentManager {
     spawnOptions: Pick<SubAgentSpawnOptions, 'roleName' | 'allowSkillSelection' | 'observabilityContext' | 'parentSessionId'> = {},
   ): SubAgentInfo | { error: string } {
     // 并发限制
-    const active = this.listByParent(parentSessionKey).filter(s => SubAgentManager.isActiveStatus(s.status));
+    const active = this.listByParent(parentSessionKey,workingDirectory).filter(s => SubAgentManager.isActiveStatus(s.status));
     if (active.length >= SubAgentManager.MAX_CONCURRENT_PER_SESSION) {
       return { error: `最多同时运行 ${SubAgentManager.MAX_CONCURRENT_PER_SESSION} 个子任务，当前已有 ${active.length} 个在运行或等待输入` };
     }
@@ -108,7 +109,9 @@ export class SubAgentManager {
       return { error: '平台回调未注册，无法派遣子智能体' };
     }
 
+    const journal = new SubAgentJournal(workingDirectory);
     const options: SubAgentSpawnOptions = {
+      onStateChange: info => journal.record(parentSessionKey,info),
       skillName,
       taskDescription,
       userMessage,
@@ -119,18 +122,21 @@ export class SubAgentManager {
       parentSessionId: spawnOptions.parentSessionId ?? parentSessionKey,
       notifyParent: async (subAgentId, taskDesc, question) => {
         const msg = `[子智能体 ${subAgentId} 反馈]\n任务：${taskDesc}\n需要你的指示：${question}`;
+        if(this.platformCallbacks.get(parentSessionKey)!==platform) throw new Error('Parent callback is no longer registered.');
         await platform.injectMessage(msg);
       },
     };
 
     const session = new SubAgentSession(id, aiService, skillManager, options);
+    journal.record(parentSessionKey,session.getInfo());
     this.subAgents.set(id, session);
     this.parentMap.set(id, parentSessionKey);
 
     // fire-and-forget
     session.run().finally(() => {
+      journal.record(parentSessionKey,session.getInfo());
       // 通知主 agent 子智能体已完成（stopped 不通知）
-      if (session.status !== 'stopped') {
+      if (session.status !== 'stopped' && this.platformCallbacks.get(parentSessionKey)===platform) {
         const info = session.getInfo();
         const statusLabel = info.status === 'completed' ? '已完成' : '失败';
         const fileList = info.outputFiles.length > 0
@@ -146,9 +152,10 @@ export class SubAgentManager {
       const retentionTimer = setTimeout(() => {
         this.subAgents.delete(id);
         this.parentMap.delete(id);
+        journal.remove(id);
       }, SubAgentManager.RETENTION_MS);
       retentionTimer.unref?.();
-    });
+    }).catch(error => Logger.warning(`[SubAgentManager] 子任务结束记录失败: ${error.message}`));
 
     const skillLabel = skillName || (options.allowSkillSelection ? 'role-selected skill' : 'no skill');
     Logger.info(`[SubAgentManager] 派遣 ${id} 执行 "${skillLabel}"${options.roleName ? ` as ${options.roleName}` : ''} (父会话: ${parentSessionKey})`);
@@ -230,24 +237,25 @@ export class SubAgentManager {
   /**
    * 按父会话查询子智能体（防止跨会话越权）
    */
-  getInfoForParent(parentSessionKey: string, subAgentId: string): SubAgentInfo | undefined {
+  getInfoForParent(parentSessionKey: string, subAgentId: string, root = process.cwd()): SubAgentInfo | undefined {
     const owner = this.parentMap.get(subAgentId);
-    if (!owner || owner !== parentSessionKey) {
-      return undefined;
-    }
+    if (!owner) return new SubAgentJournal(root).list(parentSessionKey).find(info=>info.id===subAgentId);
+    if (owner !== parentSessionKey) return undefined;
     return this.subAgents.get(subAgentId)?.getInfo();
   }
 
   /**
    * 列出某个父会话下的所有子智能体
    */
-  listByParent(parentSessionKey: string): SubAgentInfo[] {
+  listByParent(parentSessionKey: string, root = process.cwd()): SubAgentInfo[] {
     const result: SubAgentInfo[] = [];
     for (const [id, session] of this.subAgents) {
       if (this.parentMap.get(id) === parentSessionKey) {
         result.push(session.getInfo());
       }
     }
+    const known=new Set(result.map(info=>info.id));
+    result.push(...new SubAgentJournal(root).list(parentSessionKey).filter(info=>!known.has(info.id)));
     return result;
   }
 }

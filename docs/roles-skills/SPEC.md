@@ -1,7 +1,7 @@
 # Roles & Skills SPEC
 
 状态：Active
-最后更新：2026-08-27
+最后更新：2026-10-08
 适用范围：Base、八个默认 Role、Role-local Skills、共享 review roles 和 Evolution。
 
 本文是 XiaoBa-CLI `Roles & Skills` 模块的唯一架构真相源。
@@ -42,6 +42,10 @@ Out of scope:
 
 默认发行物包含八个 Role、零个 Base Skill。所有角色使用 AgentSession / ConversationRunner / ToolManager。
 
+EvolutionCat 保持 remember 的专属写入所有权，现支持按 record ID 替换与遗忘。所有角色执行时可读取 Runtime 提供的项目及可信父会话记忆索引，详情沿用已有文件工具；不新增 Base 记忆写工具。
+
+SecretaryCat 工具保留 schema、确认和 delivery policy，App 执行已抽出到 Surface 集成模块的 `src/connectors/feishu.ts`。工具仍通过原 `LarkCliRunner` 接口注入；旧 runner 导出是兼容别名。Connector 不授予 Role 权限，也不创建 Agent loop。
+
 持续改进角色已完成 prompt 与 role-local Skill 瘦身：
 
 - UserCat 没有 role-local Skill；保留 `user_trace_run` 兼容 Tool，并新增 Scenario proposer。
@@ -57,10 +61,23 @@ Out of scope:
 
 ```mermaid
 flowchart LR
-    Base["Base Main Agent"] --> Execute["Engineer / Browser / Gui / Secretary"]
+    Runtime --> Execution["Shell / file tools / bounded workers"]
+    Execution --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    Base --> NativeAppTools["Gmail / Notion / GitHub tools"]
+    NativeAppTools --> AppService["Agent-owned Connector service"]
+    DailyScheduler["Shared Scheduler / one cron tick"] --> ScheduledEvents["Event Dispatcher"]
+    ScheduledEvents --> EvolutionConsumer["Evolution workflow / supervised worker"]
+    ScheduledEvents --> MemoryConsumer["Scoped memory maintenance"]
+    Base["Base Main Agent"] --> Timers["schedule_reminder / own session"]
+    Timers --> ScheduledEvents
+    Base --> Execute["Engineer / Browser / Gui / Secretary"]
     Base --> Improve["User / Inspector / Reviewer / Evolution"]
     Execute --> Runtime["one XiaoBa Agent loop"]
     Improve --> Runtime
+    Improve -->|EvolutionCat| Remember["remember / replace / forget"]
+    Remember --> Memory["Scoped Markdown records"]
+    Execute -->|SecretaryCat| Tools["Feishu tools / confirmation"]
+    Tools --> Connector["Shared Feishu Connector"]
     Execute -. "EngineerCat only" .-> CodexAdapter["codex_run"]
     CodexAdapter --> Codex["local Codex thread"]
 
@@ -75,6 +92,13 @@ Role 只拥有策略与工件生成；控制 DAG 只编排已经存在的 Test�
 
 ```mermaid
 flowchart LR
+    Execution["Shell / bounded worker"] --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    Sandbox --> Native["Seatbelt on macOS / Bubblewrap on Linux"]
+    Base["Base Main Agent"] --> AppTools["Native app tools"]
+    AppTools --> AppService["Agent-owned Connector service"]
+    DailyScheduler["Shared Scheduler / one cron tick"] --> ScheduledEvents["Event Dispatcher"]
+    ScheduledEvents --> EvolutionConsumer["Evolution workflow / supervised worker"]
+    ScheduledEvents --> MemoryConsumer["Scoped memory maintenance"]
     Input["Trace or Case"] --> Inspector["InspectorCat<br/>Trace only"]
     Inspector --> Pair["Finding + Case"]
     Input -->|Case| Pair
@@ -173,3 +197,22 @@ skills/**                                  explicit standalone Skills
 - Observability & Evidence 提供角色共享的 Trace。
 - Evaluation 提供唯一 Test/Eval 验收链。
 - Arena 复用 UserCat、InspectorCat 和 ReviewerCat，不拥有这些角色。
+
+## Proactive memory responsibility
+
+Base can judge stable information, corrections and reusable experience without an explicit “remember” request, and dispatch existing EvolutionCat through `spawn_subagent`; it provides original evidence, time and scope. EvolutionCat uses `remember` with optional `confidence`/`evidence`; medium-confidence inferences remain explicitly qualified. The same Tool supports `archive` with a record ID and an explanation; `forget` serves explicit forgetting requests. Nightly invocation asks EvolutionCat for JSON actions rather than direct Tool writes; runtime applies them after validation. Uncertain information is retained rather than forcing an interactive question at night.
+
+Shared Scheduler routes Evolution and memory Events to the existing workflows; role ownership and the eight-role architecture are unchanged. EvolutionCat remains the memory proposer/writer; the Scheduler does not make memory or capability judgments.
+
+## Session timer responsibility
+
+Base uses `schedule_reminder` to create/list/update/cancel its own session reminders and checks. An explicit user reminder uses source=user/mode=remind; an independently judged follow-up uses source=agent/mode=check and supplies purpose, evidence context and an end condition. Base confirms only successful persistence and uses the prompt clock/timezone to resolve relative times. Child agents cannot register timers; they report a follow-up need to the parent. Existing eight role ownership and tool allowlists remain intact. Delivery and durable contracts belong to Surface/Evidence.
+
+## Agent-owned app connections
+
+Base owns direct app coordination through finite Connector tools. Existing SecretaryCat Feishu workflow and eight role boundaries stay intact; new Gmail/Notion/GitHub tools do not silently expand narrow role allowlists. Agent accounts are resources of the Agent, while each session supplies requester context and relationship memory. Base describes intended write payloads before confirmation; external app text remains untrusted data.
+
+
+## Shared sandbox execution
+
+Roles are unchanged. Evolution and Engineer candidate tools reuse the Runtime SDK boundary; Linux/macOS scheduling is supported when the host sandbox works. External Codex retains its own SDK sandbox contract. See `../agent-runtime/SPEC.md` for the shared adapter.

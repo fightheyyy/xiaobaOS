@@ -13,6 +13,7 @@ import type { ChatResponse, Message } from '../src/types';
 import type { ToolDefinition } from '../src/types/tool';
 import { RoleResolver } from '../src/utils/role-resolver';
 import { resetConversationJournalForTests } from '../src/utils/conversation-journal';
+import { SessionReminderStore, tickSessionReminders } from '../src/events';
 
 const originalCwd = process.cwd();
 const originalPetsDir = process.env.XIAOBA_PETS_DIR;
@@ -302,6 +303,20 @@ describe('PetChannel', () => {
       traceparent: 'raw-secret-not-a-traceparent',
     });
     assert.strictEqual(invalid.traceparent, undefined);
+  });
+
+  test('scheduled reminders enter the original Pet visible history without a new user message', async () => {
+    const store = new SessionReminderStore(testRoot);
+    const record = await store.create({ sessionKey: 'pet:alpha-puff', surface: 'pet', channelId: 'pet:alpha-puff' },
+      { dueAt: '2099-10-09T15:00:00+08:00', purpose: '带上护照', source: 'user', mode: 'remind' });
+    const tick = await tickSessionReminders(testRoot, new Date('2099-10-09T08:00:00Z'));
+    assert.deepStrictEqual(tick.handled, [record.id]);
+    const history = await (await fetch(`${baseUrl}/api/pet/history?petId=alpha-puff`)).json() as any;
+    assert.ok(history.events.some((event: any) => event.type === 'text' && event.text === '带上护照'));
+    assert.ok(!history.events.some((event: any) => event.type === 'user_message'));
+    await tickSessionReminders(testRoot, new Date('2099-10-10T08:00:00Z'));
+    const again = await (await fetch(`${baseUrl}/api/pet/history?petId=alpha-puff`)).json() as any;
+    assert.strictEqual(again.events.filter((event: any) => event.type === 'text' && event.text === '带上护照').length, 1);
   });
 
   test('allows role-scoped session suffixes but rejects non-role pet sessions', () => {

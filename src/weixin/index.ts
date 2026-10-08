@@ -1,3 +1,4 @@
+import { EventDispatcher, surfaceAgentEvent } from '../events';
 import axios from 'axios';
 import { WeixinConfig, WeixinMessage } from './types';
 import { MessageHandler } from './message-handler';
@@ -31,13 +32,16 @@ export class WeixinBot {
   private agentServices: AgentServices;
   private contextTokens = new Map<string, string>();
   private isRunning = false;
+  private stateReady: Promise<void>;
   private getUpdatesBuf = '';
   private stateDir: string;
+  private readonly eventDispatcher: EventDispatcher;
 
-  constructor(private config: WeixinConfig) {
+  constructor(private config: WeixinConfig, eventDispatcher?: EventDispatcher) {
     this.handler = new MessageHandler(config.cdnBaseUrl);
     this.sender = new MessageSender(config.token, config.baseUrl, config.cdnBaseUrl);
     this.stateDir = config.stateDir || path.join(process.cwd(), 'data', 'weixin');
+    this.eventDispatcher = eventDispatcher || new EventDispatcher(path.join(this.stateDir, 'events'));
 
     const roleName = RoleResolver.getActiveRoleName();
     const aiService = new AIService();
@@ -53,7 +57,10 @@ export class WeixinBot {
 
     this.sessionManager = new MessageSessionManager(this.agentServices, 'weixin');
     this.setupChannelCallbacks();
-    this.loadState();
+    this.stateReady = this.loadState();
+    this.sessionManager.setReminderChannelFactory(record => journalVisibleChannel(
+      this.createTurnContext(record.sessionKey), this.buildChannel(record.channelId, record.sessionKey),
+    ));
   }
 
   private setupChannelCallbacks(): void {
@@ -126,6 +133,8 @@ export class WeixinBot {
     await this.agentServices.skillManager.loadSkills();
     Logger.info(`已加载 ${this.agentServices.skillManager.getAllSkills().length} 个 skills`);
 
+    await this.stateReady;
+    this.sessionManager.startReminderProcessing();
     this.isRunning = true;
     Logger.success('微信机器人已启动，开始长轮询...');
 
@@ -199,6 +208,15 @@ export class WeixinBot {
 
     const parsed = this.handler.parseMessage(msg);
     if (!parsed || this.handler.shouldIgnoreMessage(parsed)) return;
+    await this.eventDispatcher.dispatch(surfaceAgentEvent({
+      surface: 'weixin', adapterId: 'weixin_message', eventType: 'weixin.message',
+      eventId: parsed.message_id === '0' ? undefined : parsed.message_id,
+      sessionKey, channelId: String(msg.to_user_id || ''), userId: from,
+      userMessage: parsed.text || '', payloadType: parsed.item_list?.some(item => item.type !== 1) ? 'media' : 'text',
+    }, `weixin:${msg.to_user_id}`), async () => this.handleParsedMessage(msg, parsed, sessionKey));
+  }
+
+  private async handleParsedMessage(msg: any, parsed: WeixinMessage, sessionKey: string): Promise<void> {
     const turn = await recordVisibleInbound({
       surface: 'weixin',
       sessionKey,

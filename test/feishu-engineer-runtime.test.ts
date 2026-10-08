@@ -1,3 +1,4 @@
+import { EventDispatcher } from '../src/events';
 import { afterEach, describe, test } from 'node:test';
 import * as assert from 'node:assert';
 import * as fs from 'fs';
@@ -270,6 +271,7 @@ describe('Feishu Engineer runtime', () => {
       appSecret: 'fake_app_secret_for_slash_skill',
       sessionTTL: 10_000,
     }, {
+      eventDispatcher: new EventDispatcher(eventRoot()),
       client: {} as any,
       wsClient: { start: () => undefined } as any,
       sender: sender as any,
@@ -281,6 +283,11 @@ describe('Feishu Engineer runtime', () => {
     });
 
     try {
+      await (bot as any).onMessage(feishuTextEvent(
+        'om_feishu_slash_skill_1',
+        '/ship release notes',
+      ));
+      // Re-delivery must not invoke the Skill or deliver its App-facing reply twice.
       await (bot as any).onMessage(feishuTextEvent(
         'om_feishu_slash_skill_1',
         '/ship release notes',
@@ -326,6 +333,7 @@ describe('Feishu Engineer runtime', () => {
       appSecret: 'fake_app_secret_for_slash_skill_error',
       sessionTTL: 10_000,
     }, {
+      eventDispatcher: new EventDispatcher(eventRoot()),
       client: {} as any,
       wsClient: { start: () => undefined } as any,
       sender: sender as any,
@@ -354,3 +362,9 @@ describe('Feishu Engineer runtime', () => {
     }
   });
 });
+
+function eventRoot(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'xiaoba-feishu-events-'));
+  conversationRoots.push(root);
+  return root;
+}

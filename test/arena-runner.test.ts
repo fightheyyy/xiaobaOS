@@ -29,14 +29,15 @@ describe('Arena clean-runtime executor', () => {
       reviewMode: 'base_skill',
       subjectId: manifest.subject_id,
       dryRun: true,
-      sandbox: { engine: 'macos_seatbelt' },
+      sandbox: { engine: 'anthropic_sdk' },
     });
 
     assert.equal(result.status, 'dry_run');
     assert.equal(result.command_kind, 'sandbox_shell_command');
-    assert.equal(result.sandbox_enforced, true);
+    assert.equal(result.sandbox_enforced, false);
+    assert.equal(result.sandbox_configured, true);
     const runner = JSON.parse(fs.readFileSync(result.runner_path, 'utf-8'));
-    assert.match(runner.sandbox_shell_command, /sandbox-exec/);
+    assert.match(runner.sandbox_shell_command, /sandbox.*worker/);
     assert.match(runner.sandbox_shell_command, /XIAOBA_ARENA_SANDBOXED='1'/);
     assert.match(runner.sandbox_shell_command, /arena' 'run' 'worker/);
     assert.deepEqual(runner.worker_command.slice(-2), ['--run-id', 'dry-run']);
@@ -48,12 +49,13 @@ describe('Arena clean-runtime executor', () => {
     ]) {
       assert.equal(runner.worker_command.includes(removed), false);
     }
-    const profile = fs.readFileSync(
-      path.join(root, 'arena', 'runs', 'dry-run', 'sandbox', 'macos-seatbelt.sb'),
-      'utf-8',
-    );
-    assert.ok(profile.includes(path.join(root, 'arena', 'runs', 'dry-run')));
-    assert.match(profile, /\(allow file-write-data \(subpath "\/dev"\)\)/);
+    const policy = JSON.parse(fs.readFileSync(
+      path.join(root, 'arena', 'runs', 'dry-run', 'sandbox', 'anthropic-policy.json'), 'utf8',
+    ));
+    assert.ok(policy.config.filesystem.allowWrite.some((entry: any) => entry.path === path.join(root, 'arena', 'runs', 'dry-run')));
+    assert.ok(policy.config.filesystem.denyWrite.some((entry: any) => entry.path?.endsWith('anthropic-policy.json')));
+    assert.equal(fs.existsSync(path.join(root, 'arena', 'runs', 'dry-run', 'sandbox', 'macos-seatbelt.sb')), false);
+
   });
 
   test('dry-run prepares the requested clean workspace seed', async () => {
@@ -72,7 +74,7 @@ describe('Arena clean-runtime executor', () => {
       subjectId: manifest.subject_id,
       workspaceSeedPath: 'fixtures/workspace-seed',
       dryRun: true,
-      sandbox: { engine: 'macos_seatbelt' },
+      sandbox: { engine: 'anthropic_sdk' },
     });
     const runtime = JSON.parse(fs.readFileSync(result.clean_runtime_path, 'utf-8'));
     assert.deepEqual(runtime.copied.workspace_seed, {
@@ -95,7 +97,7 @@ describe('Arena clean-runtime executor', () => {
       runId: 'missing-env',
       reviewMode: 'base_skill',
       subjectId: manifest.subject_id,
-      sandbox: { engine: 'macos_seatbelt' },
+      sandbox: { engine: 'anthropic_sdk' },
     }), /需要先配置 XiaoBa provider/);
     assert.equal(
       fs.existsSync(path.join(root, 'arena', 'runs', 'missing-env', 'arena-runner.json')),

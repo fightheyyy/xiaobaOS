@@ -1,7 +1,7 @@
 # Surface PLAN
 
 状态：Active
-最后更新：2026-08-28
+最后更新：2026-10-08
 Owner：Surface maintainers
 
 ## Current Status
@@ -38,7 +38,7 @@ flowchart LR
 7. GuiCat macOS optional driver packaging：completed for local unsigned/ad-hoc build and artifact inspection。
 8. Production auth and Owner permission boundary：not started。
 9. Real external upload/download and cross-process recovery E2E：not started。
-10. Evolution nightly CLI/schedule entry：completed for lightweight control workflow、cross-platform manual sleep and macOS cron。
+10. Evolution nightly CLI/schedule entry：completed for lightweight workflow and Linux/macOS shared Scheduler with SDK execution。
 11. Nightly worker timeout and owned-lock cleanup：completed。
 12. Dashboard three-state lifecycle removal：completed。
 13. Lightweight Evolution trigger and activation status：completed for CLI capability new-Session / code next-process activation evidence。
@@ -48,6 +48,24 @@ flowchart LR
 17. Remove legacy Dashboard avatars：completed；Role 卡片、当前角色徽标和侧栏品牌不再读取像素猫 PNG 或静态角色映射。
 18. Unique custom-role colors：completed；默认九色保持固定，自定义 Role 由完整已安装 inventory 统一分配不重复颜色，并供 Dashboard、Pet 与 Chat 共用；显式撞色会重分配，容量耗尽 fail closed。
 19. Native Windows desktop packaging：completed for the v0.2.2 Preview；native x64 dependencies、84/84 Surface release tests、packaged contract inspection、Dashboard launch smoke、NSIS generation and checksum verification passed on the Windows runner。
+
+## Surface / Connector / Event migration
+
+- Owner: Surface maintainers, with Roles & Skills owners for Tool adapters.
+- Completed: common Event contract and file-backed admission for Feishu, Weixin
+  and Pet; first Connector extraction for Feishu, preserving Role tools and lark-cli behavior.
+- Completed: standalone Event contract, Surface adapter and public barrel;
+  EventStore separates file/lock concerns from Dispatcher. Injected storage,
+  mutation-safe snapshots and fail-closed corrupt records have focused coverage.
+- Acceptance: Feishu, Weixin and Pet messages use common event admission; duplicate
+  events do not repeat effects; failed/interrupted handlers remain inspectable;
+  role confirmation, profile selection and delivery receipts retain their contracts.
+- Partial: Feishu busy-message queue remains in memory; `handled` is adapter
+  completion, not business completion. Interrupted/failed records are inspectable
+  but no retry/resolution UI or record-retention policy is provided.
+- Completed: shared daily and one-shot session timer producers use Event admission.
+- Future: ordinary CLI user-message admission, app-change/completion producers and authenticated
+  Owner routing. No new Agent loop or general task framework.
 
 ## Next Steps
 
@@ -59,6 +77,7 @@ flowchart LR
 
 ## Owners
 
+- Event / Connector integration：`src/events/**`、`src/connectors/**`
 - CLI：`src/commands/**`
 - Feishu / Weixin：`src/feishu/**`, `src/weixin/**`
 - Pet / Dashboard：`src/pet/**`, `src/dashboard/**`, `desktop/dashboard/**`
@@ -88,6 +107,14 @@ flowchart LR
 
 ## Recent Verification
 
+- 2026-10-08: `npm run build` passed; standard tsx-run focused integration passed
+  59/59 and repository regression passed 583/584. The sole regression failure
+  remains the pre-existing Evolution process-group timeout test in this cloud
+  container. New tests cover injectable storage, runtime completion envelopes,
+  producer/consumer mutation isolation and fail-closed malformed state. Existing
+  concurrency/restart deduplication, locks, profile/Role gates and delivery pass.
+- Scripted base runtime 11/11 and contract smoke 23/23 passed on 2026-10-07.
+
 - Conversation-focused tests pass 52/52 across Journal, shared surface wrapper,
   AgentSession, CLI, Feishu, Weixin, and Pet. A real Catena round trip preserved
   the two-message order and displayed only user-visible text/file content.
@@ -101,3 +128,36 @@ flowchart LR
 - Dashboard tests verify lifecycle mutation routes are absent and cards expose only package selection/deletion。
 - Arena-internal Pet tests prove `requiredActiveSkillName` cannot be supplied through HTTP/tool args and fails closed when missing; this adapter can be reused by the lightweight Arena migration.
 - Dashboard/Pet focused tests passed 35/35 across four suites；coverage proves deterministic allocation、4096 custom-role colors without collision、explicit collision reassignment、canonical-key collision rejection、inventory delivery、shared renderer wiring and removal of legacy avatar paths。Playwright verified the real Roles page with 14 installed Role canvases、14 unique dominant body colors and zero renderer errors；the contact sheet is `output/playwright/xiaoba-role-colors-contact-sheet.png`。Procedural-only Pet coverage continues to prove only XiaoBa is bundled、legacy sprite manifests are ignored、the sprite endpoint is absent and replay fixtures use `grok-cat-v1`。
+
+## Shared scheduled events
+
+Owner: Surface. Completed: shared daily calendar, job configuration, one cron tick, both named Event routes, migration/compatibility CLI. Tests cover sibling preservation/removal, legacy import, unrelated workspace preservation, config rollback, malformed cron refusal, restarts, DST and end-to-end CLI. Next: run schedule install on the user host to migrate existing cron; code upgrade alone does not change crontab. Operational risks: cron availability, AI environment, and inspecting interrupted Events/config locks. Full regression: 615/616 passed; the sole failure is the existing cloud descendant-process SIGKILL assertion.
+
+## Session timed wakeups
+
+Owner: Surface. Completed: original Feishu/Weixin/Pet/CLI routes, one shared due scanner called from live polling and schedule tick, offline/busy deferral, Weixin state hydration and Pet visible-history replay. Verified original IM destinations and token restoration, Pet HTTP history, concurrent scans and CLI failures. Acceptance: no separate cron per reminder, no cross-session mutation or new Agent loop. Limits: original service must be running; reopening the same CLI catches up. Next: observe live delivery on the user host. Build and focused 47/47 passed; full regression 630/631 passed; the sole failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion.
+
+## Agent-owned app connections
+
+Owner: Surface. Completed: three official native API adapters, fixed-origin bounded HTTP, cursor pagination, safe errors, Gmail single-flight refresh, injectable AgentCredentials, generic registry integration and connector list/describe/configure/verify CLI. Next: real-account verification on the user host, then app subscriptions and authenticated remote administration. Those require existing Google OAuth/client configuration and deliberate operation scopes. No live credentials were present in this cloud instance.
+
+Verification: TypeScript build and focused native connector / Feishu boundary / role-tool tests 39/39 passed, including real AgentSession confirmed-write execution with mocked official HTTP. Full regression 650/651 passed; the only failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion. Live app accounts are not yet verified.
+
+
+## Dashboard connection management
+
+Owner: Surface. Completed: sidebar page/navigation, three connection cards, write-only token/client forms, Google OAuth with state/PKCE/expiry and callback, account verification, enable/disable/disconnect, three authorization-only cards. Routes enforce socket loopback + Host/port + same-origin + explicit JSON mutation header; OAuth callback allows cross-site navigation only with valid state. Pending exchanges are invalidated on disconnect/config changes. Electron opens Google in the system browser; normal browser authorization redirects directly.
+
+Verification: TypeScript build and focused API/native connector/config/navigation tests 34/34 passed. Real Chromium exercised token save, account verification, simulated Google authorization/callback, disconnect, desktop/mobile layouts (including expanded Gmail settings) and Electron renderer external-auth behavior, with zero page errors. Native OS browser launch and real Google consent were not exercised in this cloud. Full regression 658/659 passed; sole failure remains the pre-existing cloud Evolution SIGKILL descendant assertion. Next: verify real Agent accounts; authenticated remote admin and subscriptions remain out of scope.
+
+
+Dashboard simplification: completed. Three authorization-only cards reuse existing Skills/Store components and the shared modal/config fields; no requester/scope/Feishu/control panel remains. Token connection and Google callback verify accounts automatically. All configured/enabled app operations are available by default to valid main sessions; retired grants are ignored/removed on the next write. Google OAuth covers all implemented mail operations through gmail.modify. Write confirmation and existing role/child boundaries remain intact.
+
+Verification: build and focused 50/50 passed, including cross-surface default reads/writes, old-config migration, retired API absence and exact write-confirmation tests. Real Chromium validated shared computed card styles, token/OAuth connection, all-operation defaults, disconnect, mobile modal and Electron renderer external authorization with mocked providers and no page errors. Full regression 658/659 passed; the sole failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion. Real provider credentials/consent and native OS browser launch remain user-host checks.
+
+
+Shared sandbox integration: Runtime owns the SDK executor; Surface exposes `xiaoba sandbox check` and Linux/macOS Evolution schedule installation. Execution still blocks when dependencies/isolation are unavailable. Verification is recorded in the Runtime PLAN.
+
+Connector write continuity: implemented. Durable call receipts, Agent-wide identical-uncertain-write blocking and local operator reconciliation; focused integration 98/98 passed (serial final integration) including killed-process receipt retention. App-side outcome reconciliation still needs a real account when a production response is lost.
+
+Gmail change producer: implemented. Opt-in Gmail history polling through existing Event admission and persisted session checks; account/cursor continuity, pagination, duplicate admission and offline delivery have automatic coverage (focused integration 98/98 final integration). Activation requires an authorized real account and an explicit target session. GitHub/Notion change subscriptions are not implemented.

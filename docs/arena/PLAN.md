@@ -39,7 +39,7 @@ flowchart LR
 ## Next Steps
 
 - 从真实 Arena Trace 回归高价值 Finding+Case，并逐步纳入共享 CaseSet。
-- 只有真实副作用 Case 需要时，才扩展非 macOS 的 enforced Replay adapter。
+- 验收统一 SDK 在 macOS 发行构建中的依赖与运行行为。
 - 核心单 Subject 流程稳定后，再决定是否增加最小 A/B compare。
 
 ## Owners
@@ -71,3 +71,8 @@ flowchart LR
 - 清理后 Arena/Evolution focused tests passed 71/71 across 10 suites。
 - 清理后 `npm run build` passed。
 - Contract smoke passed 23/23 cases。
+
+
+## Unified sandbox execution
+
+Owner: Arena / Runtime. Completed: clean-runtime launch policy migrated to the shared SDK executor; legacy macOS/Linux CLI engine names map to anthropic_sdk, and unsandboxed fallback is removed. Dry runs report sandbox_configured=true and sandbox_enforced=false; only successful actual execution marks enforcement. Manager/runner/CLI coverage and the Runtime acceptance suite pass. SDK host/packaging limits are in `../agent-runtime/PLAN.md`.

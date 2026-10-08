@@ -1,3 +1,5 @@
+import { EventDispatcher, surfaceAgentEvent } from '../events';
+import { ParsedFeishuMessage } from './types';
 import * as Lark from '@larksuiteoapi/node-sdk';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -54,6 +56,7 @@ interface FeishuBotRuntimeOverrides {
   wsClient?: Lark.WSClient;
   sender?: MessageSender;
   agentServices?: AgentServices;
+  eventDispatcher?: EventDispatcher;
 }
 
 const PENDING_ANSWER_TIMEOUT_MS = 120_000;
@@ -105,8 +108,9 @@ export class FeishuBot {
   private chimeInJudge: ChimeInJudge | null = null;
   /** 已知的群聊 chat_id（从 Group/*.md 读取），用于校验广播来源 */
   private knownChatIds = new Set<string>();
-  /** 已处理的消息 ID，用于去重 */
-  private processedMsgIds = new Set<string>();
+  /** 统一事件接收、状态记录与跨重启去重 */
+  private readonly eventDispatcher: EventDispatcher;
+  private readonly eventSourceId: string;
   /** key = pendingAnswerId */
   private pendingAnswers = new Map<string, PendingAnswer>();
   /** key = sessionKey, value = pendingAnswerId */
@@ -117,6 +121,8 @@ export class FeishuBot {
   private messageQueue = new Map<string, QueuedMessage[]>();
 
   constructor(config: FeishuConfig, overrides: FeishuBotRuntimeOverrides = {}) {
+    this.eventDispatcher = overrides.eventDispatcher || new EventDispatcher();
+    this.eventSourceId = `feishu:${config.appId}`;
     const baseConfig = {
       appId: config.appId,
       appSecret: config.appSecret,
@@ -188,6 +194,10 @@ export class FeishuBot {
       await channel.reply(channelId, text);
     });
 
+    this.sessionManager.setReminderChannelFactory(record => journalVisibleChannel(
+      this.createTurnContext(record.sessionKey), this.buildChannel(record.channelId, { sessionKey: record.sessionKey }),
+    ));
+
     // H1: 注入同事档案到 session
     const teammateCtx = buildTeammateContext(teammates);
     if (teammateCtx) {
@@ -222,6 +232,7 @@ export class FeishuBot {
       await this.bridgeServer.start();
     }
 
+    this.sessionManager.startReminderProcessing();
     this.wsClient.start({
       eventDispatcher: new Lark.EventDispatcher({}).register({
         'im.message.receive_v1': async (data: any) => {
@@ -281,20 +292,16 @@ export class FeishuBot {
     const msg = this.handler.parse(data);
     if (!msg) return;
 
-    // 消息去重：跳过已处理的 messageId
-    if (this.processedMsgIds.has(msg.messageId)) return;
-    this.processedMsgIds.add(msg.messageId);
+    const key = msg.chatType === 'group' ? `group:${msg.chatId}` : `user:${msg.senderId}`;
+    await this.eventDispatcher.dispatch(surfaceAgentEvent({
+      surface: 'feishu', adapterId: 'feishu_message', eventType: 'feishu.message',
+      eventId: msg.messageId, sessionKey: key, channelId: msg.chatId,
+      userId: msg.senderId, userMessage: msg.text, payloadType: msg.file ? 'file' : 'text',
+      traceparent: msg.traceparent,
+    }, this.eventSourceId), async () => this.handleParsedMessage(msg, key));
+  }
 
-    // 防止 Set 无限增长，超过 1000 条时清理旧记录
-    if (this.processedMsgIds.size > 1000) {
-      const ids = Array.from(this.processedMsgIds);
-      this.processedMsgIds = new Set(ids.slice(-500));
-    }
-
-
-    const key = msg.chatType === 'group'
-      ? `group:${msg.chatId}`
-      : `user:${msg.senderId}`;
+  private async handleParsedMessage(msg: ParsedFeishuMessage, key: string): Promise<void> {
     const turn = await recordVisibleInbound({
       surface: 'feishu',
       sessionKey: key,

@@ -1,5 +1,7 @@
+import { SANDBOX_FILE_TOOLS, executeFileToolInSandbox } from '../sandbox/tool-execution';
 import * as crypto from 'crypto';
 import * as path from 'path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   ArtifactManifestItem,
   DeliveryEvidence,
@@ -14,6 +16,9 @@ import {
   ToolResultStatus,
 } from '../types/tool';
 import { Logger } from '../utils/logger';
+import { ScheduleReminderTool } from './schedule-reminder-tool';
+import { AgentConnectorService } from '../connectors/service';
+import { createConnectorTools } from './connector-tools';
 import { ReadTool } from './read-tool';
 import { WriteTool } from './write-tool';
 import { ShellTool } from './bash-tool';
@@ -124,6 +129,10 @@ export class ToolManager implements ToolExecutor {
   private toolLayers: Map<string, ToolLayer> = new Map();
   private options: ToolManagerOptions;
 
+  getWorkingDirectory(): string {
+    return this.workingDirectory;
+  }
+
   constructor(
     workingDirectory: string = process.cwd(),
     contextDefaults: Partial<ToolExecutionContext> = {},
@@ -152,6 +161,8 @@ export class ToolManager implements ToolExecutor {
 
     // 元工具
     this.registerBaseTool(new SpawnSubagentTool());
+    this.registerBaseTool(new ScheduleReminderTool());
+    for (const tool of createConnectorTools(new AgentConnectorService(this.workingDirectory))) this.registerBaseTool(tool);
 
     // Sub-Agent 管理 (2)
     this.registerBaseTool(new CheckSubagentTool());
@@ -272,6 +283,7 @@ export class ToolManager implements ToolExecutor {
         conversationHistory: conversationHistory || [],
         ...this.contextDefaults,
         ...contextOverrides,
+        toolCallId: toolCall.id,
       };
 
       try {
@@ -302,7 +314,9 @@ export class ToolManager implements ToolExecutor {
         });
       }
 
-      const output = await tool.execute(args, context);
+      const output = SANDBOX_FILE_TOOLS.has(toolName) && process.env.XIAOBA_SANDBOXED !== '1'
+        ? await executeFileToolInSandbox(toolName, args, context)
+        : await tool.execute(args, context);
       let content: any;
       let newMessages: any[] | undefined;
       let explicitDeliveryEvidence: DeliveryEvidence[] = [];
@@ -920,6 +934,7 @@ export class ToolManager implements ToolExecutor {
   private isToolVisible(toolName: string, context: Partial<ToolExecutionContext>): boolean {
     return this.isLayerToolVisible(toolName, context)
       && this.isScopedToolVisible(toolName, context)
+      && this.tools.get(toolName)?.isAvailable?.(context) !== false
       && !this.isConfirmedToolGated(toolName, context);
   }
 
@@ -1011,7 +1026,10 @@ export class ToolManager implements ToolExecutor {
       };
     }
 
-    const binding = this.hasConfirmationPayloadBinding(args, confirmation);
+    const keys = this.tools.get(resolveToolName(toolName))?.definition.confirmationPayloadKeys;
+    const binding = keys?.length
+      ? { allowed: this.matchesCompleteJsonProposal(args, keys, confirmation, context), anchorCount: keys.length }
+      : this.hasConfirmationPayloadBinding(args, confirmation);
     if (!binding.allowed) {
       return {
         allowed: false,
@@ -1028,11 +1046,13 @@ export class ToolManager implements ToolExecutor {
 
   private isConfirmedToolConfigured(toolName: string, context: Partial<ToolExecutionContext>): boolean {
     const resolvedName = resolveToolName(toolName);
+    if (this.tools.get(resolvedName)?.definition.requiresConfirmation) return true;
     const gate = this.resolveRoleConfig(context.roleName)?.confirmedToolGate;
     return Boolean(gate?.tools?.map(resolveToolName).includes(resolvedName));
   }
 
   private requiresImmediateConfirmation(toolName: string, context: Partial<ToolExecutionContext>): boolean {
+    if (this.tools.get(resolveToolName(toolName))?.definition.requiresConfirmation) return true;
     if (!this.isConfirmedToolConfigured(toolName, context)) {
       return false;
     }
@@ -1045,11 +1065,14 @@ export class ToolManager implements ToolExecutor {
     }
 
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
-      const message = conversationHistory[i] as { role?: unknown; content?: unknown };
+      const message = conversationHistory[i] as { role?: unknown; content?: unknown; __injected?: boolean };
       if (message?.role !== 'user') {
         continue;
       }
-      const text = this.contentToString(message.content).trim().toLowerCase();
+      const text = this.contentToString(message.content).trim();
+      if (message.__injected || text.startsWith('[scheduled_wakeup]')) {
+        return { confirmed: false, reason: 'internal context is not a user confirmation', userText: '', proposalText: '' };
+      }
       if (!text) {
         return { confirmed: false, reason: 'latest user confirmation turn is empty', userText: '', proposalText: '' };
       }
@@ -1078,7 +1101,7 @@ export class ToolManager implements ToolExecutor {
     for (let i = latestUserIndex - 1; i >= 0; i--) {
       const message = conversationHistory[i] as { role?: unknown; content?: unknown };
       if (message?.role === 'assistant') {
-        return this.contentToString(message.content).trim().toLowerCase();
+        return this.contentToString(message.content).trim();
       }
     }
     return '';
@@ -1099,6 +1122,51 @@ export class ToolManager implements ToolExecutor {
     ].filter(Boolean).join('\n'));
     const allowed = anchors.some(anchor => contextText.includes(anchor));
     return { allowed, anchorCount: anchors.length };
+  }
+
+  private matchesCompleteJsonProposal(args: unknown, keys: string[], confirmation: ImmediateConfirmationEvidence, context: Partial<ToolExecutionContext>): boolean {
+    if (!args || typeof args !== 'object') return false;
+    const expected = args as Record<string,unknown>;
+    const history = context.conversationHistory || [];
+    // Scan balanced JSON objects, preserving field structure rather than matching a single string anchor.
+    const sources = [confirmation.userText];
+    let pastConfirmation = false;
+    let confirmationIndex = history.length;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i]?.role === 'user') { if (pastConfirmation) break; pastConfirmation = true; confirmationIndex = i; continue; }
+      if (pastConfirmation && history[i]?.role === 'assistant') {
+        // Channel final text can be hidden. Bind only a successful send_text proposal there.
+        if (!CHANNEL_SURFACES.has(context.surface || '')) sources.push(this.contentToString(history[i].content));
+        for (const call of [...(history[i].tool_calls || [])].reverse()) {
+          if (call.function?.name !== 'send_text') continue;
+          const receipt = history.slice(i + 1, confirmationIndex).find((message: any) => message.role === 'tool' && message.name === 'send_text' && message.tool_call_id === call.id);
+          if (receipt?.content !== '已发送') continue;
+          try { const sent = JSON.parse(call.function.arguments); if (typeof sent.text === 'string') sources.push(sent.text); } catch {}
+        }
+      }
+    }
+    for (const source of sources) {
+      if (source.length > 256 * 1024) continue;
+      let start = -1, depth = 0, quoted = false, escaped = false;
+      const proposals: Record<string,unknown>[] = [];
+      for (let i = 0; i < source.length; i++) {
+        const char = source[i];
+        if (start < 0) { if (char === '{') { start = i; depth = 1; quoted = false; escaped = false; } continue; }
+        if (quoted) { if (escaped) escaped = false; else if (char === '\\') escaped = true; else if (char === '"') quoted = false; continue; }
+        if (char === '"') quoted = true;
+        else if (char === '{') depth++;
+        else if (char === '}' && --depth === 0) {
+          try {
+            const proposal = JSON.parse(source.slice(start,i + 1));
+            if (keys.every(key => Object.prototype.hasOwnProperty.call(proposal,key))) proposals.push(proposal);
+          } catch {}
+          start = -1;
+        }
+      }
+      const latest = proposals[proposals.length - 1];
+      if (latest) return keys.every(key => isDeepStrictEqual(latest[key],expected[key]));
+    }
+    return false;
   }
 
   private collectConfirmationAnchors(value: unknown, keyHint = '', depth = 0): string[] {

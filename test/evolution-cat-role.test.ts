@@ -124,4 +124,32 @@ describe('EvolutionCat role', () => {
     assert.equal(invalidKind.status, 'failure');
     assert.equal(invalidKind.error_code, 'INVALID_TOOL_ARGUMENTS');
   });
+
+  test('remember corrects and forgets only records belonging to the trusted parent session', async () => {
+    const saved = MemoryFinalizer.remember('owner', '喜欢咖啡', { rootDir: testRoot });
+    MemoryFinalizer.remember('other', '喜欢果汁', { rootDir: testRoot });
+    const manager = createRoleAwareToolManager(testRoot, {
+      roleName: 'evolution-cat', sessionId: 'worker', parentSessionId: 'owner',
+    }, 'evolution-cat');
+    const correction = await manager.executeTool({
+      id: 'correct', type: 'function', function: {
+        name: 'remember', arguments: JSON.stringify({ content: '喜欢茶', replaces: saved.record.id }),
+      },
+    });
+    assert.equal(correction.status, 'success');
+    const payload = JSON.parse(String(correction.content));
+    assert.equal(payload.action, 'updated');
+    assert.deepEqual(MemoryFinalizer.loadSessionMemory('owner', testRoot)?.records.map(record => record.text), ['用户记忆：喜欢茶。']);
+    const forgotten = await manager.executeTool({
+      id: 'forget', type: 'function', function: {
+        name: 'remember', arguments: JSON.stringify({ action: 'forget', record_id: payload.record_id }),
+      },
+    });
+    assert.equal(forgotten.status, 'success');
+    assert.equal(JSON.parse(String(forgotten.content)).action, 'forgotten');
+    assert.equal(forgotten.artifact_manifest?.[0]?.action, 'updated');
+    assert.deepEqual(MemoryFinalizer.loadSessionMemory('owner', testRoot)?.records, []);
+    assert.equal(MemoryFinalizer.loadSessionMemory('other', testRoot)?.records.length, 1);
+    assert.equal(MemoryFinalizer.loadSessionMemory('worker', testRoot), null);
+  });
 });

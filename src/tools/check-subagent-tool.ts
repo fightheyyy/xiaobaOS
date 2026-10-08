@@ -34,7 +34,7 @@ export class CheckSubagentTool implements Tool {
 
     // 查询特定子智能体
     if (subagent_id) {
-      const info = manager.getInfoForParent(sessionKey, subagent_id);
+      const info = manager.getInfoForParent(sessionKey, subagent_id,context.workingDirectory);
       if (!info) {
         return toolFailure(`未找到子智能体 ${subagent_id}`, 'SUBAGENT_NOT_FOUND');
       }
@@ -42,7 +42,7 @@ export class CheckSubagentTool implements Tool {
     }
 
     // 列出当前会话所有子智能体
-    const all = manager.listByParent(sessionKey);
+    const all = manager.listByParent(sessionKey,context.workingDirectory);
     if (all.length === 0) {
       return toolSuccess('当前没有后台运行的子任务。');
     }
@@ -57,6 +57,7 @@ export class CheckSubagentTool implements Tool {
       completed: '✅ 已完成',
       failed: '❌ 失败',
       stopped: '⏹️ 已停止',
+      interrupted: '⚠️ 已中断',
       waiting_for_input: '⏸️ 等待输入',
     };
 
@@ -77,6 +78,7 @@ export class CheckSubagentTool implements Tool {
       lines.push(`最近进度: ${recent.join(' → ')}`);
     }
 
+    if(info.recoveryNote) lines.push(`恢复: ${info.recoveryNote}`);
     if (info.resultSummary) {
       lines.push(`结果摘要: ${info.resultSummary.slice(0, 500)}`);
     }

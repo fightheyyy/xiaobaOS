@@ -1,3 +1,5 @@
+import { ProviderCallOptions } from '../providers/provider';
+import { throwIfCancelled, isCancellation } from '../utils/cancellation';
 import { Message, ContentBlock } from '../types';
 import { AIService } from '../utils/ai-service';
 import { estimateMessagesTokens } from './token-estimator';
@@ -630,7 +632,9 @@ export class ContextCompressor {
   async compact(
     messages: Message[],
     customInstructions?: string,
+    options?: ProviderCallOptions,
   ): Promise<Message[]> {
+    throwIfCancelled(options?.abortSignal);
     const before = estimateMessagesTokens(messages);
 
     const preservedSystem = messages.filter(m =>
@@ -699,7 +703,7 @@ export class ContextCompressor {
         undefined,
         {
           onText: (text) => { fullContent += text; },
-        }
+        }, options
       );
       const rawSummary = fullContent;
 
@@ -822,10 +826,13 @@ export class ContextCompressor {
   async compactWithFallback(
     messages: Message[],
     customInstructions?: string,
+    options?: ProviderCallOptions,
   ): Promise<Message[]> {
+    throwIfCancelled(options?.abortSignal);
     try {
-      return await this.compact(messages, customInstructions);
+      return await this.compact(messages, customInstructions, options);
     } catch (err: any) {
+      if (isCancellation(err)) throw err;
       return this.compactDeterministic(messages, err?.message || String(err));
     }
   }

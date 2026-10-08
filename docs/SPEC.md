@@ -1,7 +1,7 @@
 # XiaoBa-CLI SPEC
 
 状态：Active
-最后更新：2026-08-03
+最后更新：2026-10-08
 适用范围：`XiaoBa-CLI` 整体架构、agent harness 边界、核心状态机、运行证据和评测闭环。
 
 本文是 `XiaoBa-CLI` 的项目级架构真相源。项目只维护本文和六个模块 SPEC；角色、benchmark、desktop、test 和实验实现不再各自复制架构文档。
@@ -12,7 +12,7 @@ XiaoBa-CLI 的稳定文档结构是一个项目级大 SPEC 加六个顶层模块
 
 | 模块 | SPEC | PLAN | 覆盖范围 |
 | --- | --- | --- | --- |
-| Surface：入口层 | [`surface/SPEC.md`](surface/SPEC.md) | [`surface/PLAN.md`](surface/PLAN.md) | `src/commands`、`src/feishu`、`src/weixin`、`src/pet`、`src/dashboard`、`desktop` |
+| Surface：入口层 | [`surface/SPEC.md`](surface/SPEC.md) | [`surface/PLAN.md`](surface/PLAN.md) | `src/commands`、`src/feishu`、`src/weixin`、`src/pet`、`src/dashboard`、`src/events`、`src/connectors`、`desktop` |
 | Agent Runtime：会话与工具编排层 | [`agent-runtime/SPEC.md`](agent-runtime/SPEC.md) | [`agent-runtime/PLAN.md`](agent-runtime/PLAN.md) | `src/core`、`src/providers`、`src/tools`、runtime 类型、session lifecycle 和 agent loop |
 | Roles & Skills：Base + 八角色策略层 | [`roles-skills/SPEC.md`](roles-skills/SPEC.md) | [`roles-skills/PLAN.md`](roles-skills/PLAN.md) | Base Main Agent、八个默认 Role Subagent、`roles`、`src/roles`、`skills`、`src/skills` |
 | Observability & Evidence：观测证据层 | [`observability-evidence/SPEC.md`](observability-evidence/SPEC.md) | [`observability-evidence/PLAN.md`](observability-evidence/PLAN.md) | `src/observability`、`logs`、`data`、`memory`、`output`、trace projection 和 artifact evidence |
@@ -39,6 +39,7 @@ Harness is the runtime.
 - `trace`：一次用户请求从进入 runtime 到本次 `ConversationRunner` while loop 截止的闭环，是产品、观测、eval 和 benchmark 的最小用户意图单元。
 - `turn`：`ConversationRunner` 内部 while loop 的一次 model request / tool result 推进一步。`turn` 不再指完整用户请求。
 - `span`：trace 内可计时的子操作，例如 model、tool、provider、delivery。
+- `AgentEvent`：外部或 Runtime 触发的统一输入，包含 source、session target 和 payload；由集成 Event 层记录、去重和分发，不等同于 Trace event。
 - `event`：trace 内的离散事实，例如 `session_started`、`session_completed`、`provider_error`；新日志默认嵌在 trace 主记录里。
 - `metric`：token、latency、count 等数值事实，由 trace/event/tool facts 投影产生。
 - `case`：trace 清洗、裁剪、补充 rubric 后进入 eval/benchmark 的评测样本。
@@ -62,6 +63,15 @@ Harness is the runtime.
 
 ```mermaid
 flowchart LR
+    Runtime --> Execution["Shell / file tools / bounded workers"]
+    Execution --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    Runtime --> Connector["Agent-owned App Connectors"]
+    Connector --> Apps["Gmail / Notion / GitHub / Feishu"]
+    SessionTimer["Persisted session reminders / checks"] --> ScheduledEvents
+    ScheduledEvents --> SessionWake["Existing Surface / AgentSession"]
+    DailyScheduler["Shared Scheduler / one cron tick"] --> ScheduledEvents["Event Dispatcher"]
+    ScheduledEvents --> EvolutionConsumer["Evolution workflow / supervised worker"]
+    ScheduledEvents --> MemoryConsumer["Scoped memory maintenance"]
     subgraph Use["1) Use"]
         direction TB
         Surface["Surface<br/>CLI / IM / Pet / Dashboard"]
@@ -89,10 +99,16 @@ flowchart LR
         Arena["Arena<br/>Scenario + clean runtime + shared Eval"]
     end
 
-    Surface --> Runtime
+    Surface -->|Feishu / Weixin / Pet| Event["Event admission<br/>durable records / deduplication"]
+    Event --> Runtime
+    Surface -->|CLI / control paths| Runtime
+    Runtime --> AppTools["SecretaryCat tools"]
+    AppTools --> FeishuConnector["Feishu Connector"]
+    FeishuConnector --> Feishu["lark-cli / Feishu"]
     Policy --> Runtime
     Runtime --> CodexAdapter
     CodexAdapter --> Codex
+    MemoryFiles["File memory<br/>bounded project / session indexes"] --> Runtime
     Runtime --> Evidence
     Evidence --> Otel
     Runtime --> Test
@@ -114,7 +130,20 @@ Case 把问题变成可执行实验，Outcome 是一次真实执行的唯一裁�
 
 ```mermaid
 flowchart LR
-    Surface["Surface<br/>CLI / IM / Pet / Dashboard"] --> Runtime["Agent Runtime<br/>one shared loop"]
+    Execution["Shell / bounded worker"] --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    Sandbox --> Native["Seatbelt on macOS / Bubblewrap on Linux"]
+    SessionTimer["Persisted session reminders / checks"] --> ScheduledEvents
+    ScheduledEvents --> SessionWake["Existing Surface / AgentSession"]
+    DailyScheduler["Shared Scheduler / one cron tick"] --> ScheduledEvents["Event Dispatcher"]
+    ScheduledEvents --> EvolutionConsumer["Evolution workflow / supervised worker"]
+    ScheduledEvents --> MemoryConsumer["Scoped memory maintenance"]
+    Surface["Surface<br/>user entry / delivery"] --> Event["Event<br/>shared trigger admission"]
+    Event --> Runtime["Agent Runtime<br/>one shared loop"]
+    Runtime --> Tools["Role tools"]
+    Tools --> Connector["Connector<br/>Agent-to-app access"]
+    Connector --> Apps["External apps"]
+    Apps --> Connector
+    Connector --> Event
     Roles["Roles & Skills<br/>8 shared Roles"] --> Runtime
     Runtime --> EngineerAdapter["EngineerCat Codex adapter<br/>optional external executor"]
     EngineerAdapter --> Codex["local Codex thread"]
@@ -155,11 +184,21 @@ flowchart LR
   `codex_run` Tool 把实质性编码委托给本机 Codex。XiaoBa 只提供固定工作区、只读/可写模式、
   AbortSignal 和结构化 ToolResult；不复制 Codex 的 agent loop，不保存第二套 job/session 状态。
 
+## Surface / Connector / Event direction
+
+The user-approved integration target keeps Surface as user entry and delivery,
+introduces Connector as the app-access boundary beneath Role tools, and Event as
+the common trigger/admission boundary before existing session execution. These
+are responsibilities within the current module set, not three new top-level
+modules. Event now exposes a standalone contract, injectable EventStore and
+Dispatcher through `src/events/index.ts`; Surface conversion is an adapter.
+The canonical contracts and migration live in `docs/surface/SPEC.md`.
+
 ## 核心组件边界
 
 | 组件 | 职责 | 不能承担的职责 |
 | --- | --- | --- |
-| `AgentSession` | 管 session 生命周期、busy/interrupt、上下文压缩触发、skill 激活、session log、context restore 和长期 memory 落盘触发 | 不直接实现 tool 业务；不直接适配某个平台 API；不默认把长期 memory 注入 provider prompt |
+| `AgentSession` | 管 session 生命周期、busy/interrupt、上下文压缩触发、skill 激活、session log、context restore 和长期 memory 落盘触发 | 不直接实现 tool 业务；不直接适配某个平台 API；不把完整长期 memory 或其他会话记忆默认注入 provider prompt |
 | `ConversationRunner` | 管 agent loop：model call -> tool calls -> tool results -> next model call；保证 transcript 合法 | 不保存长期 session；不决定角色配置 |
 | `ToolManager` | 管三层工具注册、可见性、参数解析、执行边界、结果归一化、错误码和 retryable 信号；工具层级包括 base tool、role tool 和 surface tool | 不参与模型推理；不维护多轮对话状态；不把平台交付工具伪装成角色工具 |
 | `ContextCompressor` | 管长上下文状态迁移，在压缩后保留任务目标、约束、artifact 状态和最近上下文 | 不做业务总结；不替代 memory |
@@ -215,9 +254,9 @@ XiaoBa 的状态不能只用一个 `messages[]` 描述。需要区分四层：
 
 `data/sessions/<surface>/<session-key>.jsonl` 是会话恢复主路径：保存 provider-visible transcript 和 compact system messages，用于同一个入口里的同一个 session 断开、TTL cleanup 或进程重启后继续上下文。迁移期兼容读取旧的 `data/sessions/<session-key>.jsonl`，但新写入必须落到 surface 子目录。
 
-`memory/sessions/<session-key-hash>/MEMORY.md` 是按 session/person 维度维护的长期记忆笔记：只保存稳定偏好、习惯、称呼、默认工作方式和用户明确要求记住的事实。它是 Markdown 主存储，便于人类阅读、diff、编辑和删除。
+`memory/sessions/<session-key-hash>/MEMORY.md` 是按 session/person 维度维护的长期记忆笔记：只保存稳定偏好、习惯、称呼、默认工作方式和有长期价值、来源明确的事实与可复用经验。它是 Markdown 主存储，便于人类阅读、diff、编辑和删除。
 
-长期 memory 不默认加载进 provider prompt。恢复会话时只恢复对应 surface 下的 `data/sessions`；长期 memory 只能通过显式 recall、后续工具或用户请求按需注入，并且注入内容必须小而相关。当前任务进度、刚失败的命令、下一步待办和临时文件路径属于 `data/sessions` / `[session_memory]`，不能自动固化为长期 memory。
+恢复会话时只恢复对应 surface 下的 `data/sessions`。每次请求重新读取当前工作区的 `memory/MEMORY.md` 项目索引和当前 session 的 `MEMORY.md` 有界内容，以 transient memory context 提供给模型；详情通过已有文件工具按需读取，不展开整个目录，不使用向量数据库。索引上下文不写回恢复 transcript。EvolutionCat 的 `remember` 支持记录、按 ID 替换及遗忘；文件布局和维护契约由 Observability & Evidence SPEC 持有。当前任务进度、刚失败的命令、下一步待办和临时文件路径属于 `data/sessions` / `[session_memory]`，不能自动固化为长期 memory。
 
 ## Conversation Contract
 
@@ -406,3 +445,25 @@ source-code Finding 现在由 EvolutionCat 返回一次性 `delegate_code`，再
 - `roles/`、`skills/`、`desktop/`、`eval/`、`test/` 和 benchmark 目录不再维护重复 SPEC/PLAN；设计和进展回写所属模块。
 - `prompts/**/*.md` 和 `**/SKILL.md` 是运行时源文件，不计入架构文档集合。
 - 如果实现改变了本文定义的组件边界、状态机、日志格式或 live eval 边界，必须同步更新本文。
+
+主动记忆通过 Base 判断并派给 EvolutionCat；独立的 `memory maintain` 与夜间 schedule 消费新增可见聊天，维护 scoped Markdown，不运行代码自进化。详细维护与落盘合同见 Observability & Evidence SPEC。
+
+夜间调度已统一为一个工作区 Scheduler，经 Event Dispatcher 分发 Evolution 与文件记忆维护；手动执行同样进入 Event，既有 worker/记忆执行机制保持独立。共享接口与 cron 迁移合同见 Surface SPEC。
+
+个人连续性以已有 sessionKey 为边界：同一 key 的对话与长期记忆持续累积，不自动绑定或合并跨入口身份。群聊按群会话、Pet/CLI 按其既有会话范围共享；sessionKey 不等价于统一的自然人身份。
+
+## Session timed wakeups
+
+Implemented: Base owns one-shot reminders and proactive future checks within the existing sessionKey boundary. The shared Scheduler produces due Events; the original Surface delivers a reminder or invokes its existing AgentSession. No cross-surface identity merging or second Agent loop. Contracts and availability limits live in [Surface SPEC](surface/SPEC.md#session-timed-wakeups), runtime behavior in [Runtime SPEC](agent-runtime/SPEC.md#session-timed-wakeups), and durable state in [Evidence SPEC](observability-evidence/SPEC.md#session-timed-wakeups).
+
+## Agent-owned app connections
+
+Agent owns app accounts, credentials and Connections. Session identifies the person/group conversing with the Agent and isolates relationship memory; it does not own an app account. Gmail, Notion and GitHub native API Connectors reuse a shared bounded HTTP/credential boundary; Feishu retains its official CLI adapter. Request authority is separate from connection ownership.
+
+
+Dashboard now manages Agent-owned app connections through local-only management routes and the shared Connector service. Gmail browser OAuth and write-only GitHub/Notion token entry persist in a private Agent credential file, while relationship memory remains session-scoped. Each valid main session can use all implemented app operations without per-session grants. Contracts and limitations live in Surface/Evidence SPEC; remote owner administration and app subscriptions remain future work.
+
+
+## Shared sandbox execution
+
+Runtime process isolation now uses one Anthropic Sandbox Runtime SDK adapter. Shell/file tools, bounded SubAgents and Arena/Evolution reuse it; Connector credentials stay host-owned. See `agent-runtime/SPEC.md` for the policy and execution contract.

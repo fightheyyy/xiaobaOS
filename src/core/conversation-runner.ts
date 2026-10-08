@@ -1,3 +1,4 @@
+import { cancellableDelay, throwIfCancelled, isCancellation } from '../utils/cancellation';
 import * as crypto from 'crypto';
 import { Message, ContentBlock } from '../types';
 import { AIService } from '../utils/ai-service';
@@ -77,6 +78,7 @@ export interface RunnerCallbacks {
  * 对话运行结果
  */
 export interface RunResult {
+  cancelled?: boolean;
   /** 最终文本回复 */
   response: string;
   /** 最终文本是否代表用户可见输出 */
@@ -150,6 +152,7 @@ export interface RunnerOptions {
  */
 export class ConversationRunner {
   private maxTurns: number;
+  private runId?: string;
   private compressor: ContextCompressor;
   private stream: boolean;
   private shouldContinue?: () => boolean;
@@ -209,6 +212,7 @@ export class ConversationRunner {
    * @returns 最终文本回复和完整消息列表
    */
   async run(messages: Message[], callbacks?: RunnerCallbacks): Promise<RunResult> {
+    this.runId = this.toolExecutionContext?.runId || crypto.randomUUID();
     const newMessages: Message[] = [];
     const toolResults: RunToolResult[] = [];
     const toolVisibility: ToolVisibilitySnapshot[] = [];
@@ -219,7 +223,7 @@ export class ConversationRunner {
     let thinkingCount = 0;
 
     while (turns++ < this.maxTurns) {
-      if (this.shouldContinue && !this.shouldContinue()) {
+      if (this.toolExecutionContext?.abortSignal?.aborted || this.shouldContinue && !this.shouldContinue()) {
         break;
       }
 
@@ -240,7 +244,7 @@ export class ConversationRunner {
           Logger.info(`上下文使用率 ${usagePercent}%，触发压缩...`);
           const messagesBefore = messages.length;
           try {
-            const compacted = await this.compressor.compactWithFallback(messages);
+            const compacted = await this.compressor.compactWithFallback(messages, undefined, { abortSignal: this.toolExecutionContext?.abortSignal });
             messages.length = 0;
             messages.push(...compacted);
             const messageTokensAfter = estimateMessagesTokens(messages);
@@ -309,7 +313,9 @@ export class ConversationRunner {
 
       let response;
       try {
+        throwIfCancelled(this.toolExecutionContext?.abortSignal);
         response = await this.requestModelResponse(requestMessages, activeTools, callbacks);
+        throwIfCancelled(this.toolExecutionContext?.abortSignal);
         const aiDuration = Date.now() - aiStartTime;
         const modelAttrs = {
           ...this.baseObservabilityAttributes(),
@@ -336,6 +342,10 @@ export class ConversationRunner {
         observability.endSpan(modelSpan, { status: 'ok', attributes: modelAttrs });
         Logger.info(`[${this.sessionLabel}Turn ${turns}] AI推理完成，耗时: ${aiDuration}ms`);
       } catch (error: any) {
+        if (isCancellation(error) || this.toolExecutionContext?.abortSignal?.aborted) {
+          observability.endSpan(modelSpan, { status: 'ok', attributes: { 'xiaoba.model.status': 'cancelled' } });
+          return { cancelled:true, response:'',finalResponseVisible:false,messages,newMessages,toolResults,toolVisibility };
+        }
         const errorAttrs = {
           ...this.baseObservabilityAttributes(),
           'xiaoba.turn': turns,
@@ -459,7 +469,7 @@ export class ConversationRunner {
 
       for (let toolIndex = 0; toolIndex < response.toolCalls.length; toolIndex++) {
         const toolCall = response.toolCalls[toolIndex];
-        if (this.shouldContinue && !this.shouldContinue()) {
+        if (this.toolExecutionContext?.abortSignal?.aborted || this.shouldContinue && !this.shouldContinue()) {
           const reason = 'Runner interrupted before executing pending tool calls.';
           const cancelledToolCalls = response.toolCalls.slice(toolIndex);
           for (const cancelledToolCall of cancelledToolCalls) {
@@ -502,6 +512,7 @@ export class ConversationRunner {
             messages,
             {
               ...this.toolExecutionContext,
+              runId: this.runId,
               activeSkillName: this.activeSkillName,
               activeToolsets: this.activeSkillToolsets,
               observabilityContext: toolSpan.context,
@@ -646,6 +657,7 @@ export class ConversationRunner {
       if (shouldCancelRun) {
         Logger.info(`[${this.sessionLabel}Turn ${turns}] interrupt 已触发，本轮取消收束`);
         return {
+          cancelled: true,
           response: '',
           finalResponseVisible: false,
           messages,
@@ -668,6 +680,9 @@ export class ConversationRunner {
       }
     }
 
+    if (this.toolExecutionContext?.abortSignal?.aborted || this.shouldContinue && !this.shouldContinue()) {
+      return { cancelled:true,response:'',finalResponseVisible:false,messages,newMessages,toolResults,toolVisibility };
+    }
     Logger.warning(`达到最大工具调用轮次 (${this.maxTurns})`);
     return {
       response: this.usesChannelDelivery() ? '' : '[达到最大工具调用轮次，请继续对话]',
@@ -1082,12 +1097,12 @@ export class ConversationRunner {
     try {
       if (this.stream) {
         const streamCallbacks: StreamCallbacks = {
-          onText: this.usesChannelDelivery() ? undefined : (text) => callbacks?.onText?.(text),
+          onText: this.usesChannelDelivery() ? undefined : (text) => { if (!this.toolExecutionContext?.abortSignal?.aborted) callbacks?.onText?.(text); },
           onRetry: (attempt, maxRetries) => callbacks?.onRetry?.(attempt, maxRetries),
         };
-        return await this.aiService.chatStream(messages, activeTools, streamCallbacks);
+        return await this.aiService.chatStream(messages, activeTools, streamCallbacks, { abortSignal: this.toolExecutionContext?.abortSignal });
       }
-      return await this.aiService.chat(messages, activeTools);
+      return await this.aiService.chat(messages, activeTools, { abortSignal: this.toolExecutionContext?.abortSignal });
     } catch (error: any) {
       if (!this.isPromptTooLongError(error)) {
         throw error;
@@ -1099,12 +1114,12 @@ export class ConversationRunner {
 
       if (this.stream) {
         const streamCallbacks: StreamCallbacks = {
-          onText: this.usesChannelDelivery() ? undefined : (text) => callbacks?.onText?.(text),
+          onText: this.usesChannelDelivery() ? undefined : (text) => { if (!this.toolExecutionContext?.abortSignal?.aborted) callbacks?.onText?.(text); },
           onRetry: (attempt, maxRetries) => callbacks?.onRetry?.(attempt, maxRetries),
         };
-        return await this.aiService.chatStream(messages, activeTools, streamCallbacks);
+        return await this.aiService.chatStream(messages, activeTools, streamCallbacks, { abortSignal: this.toolExecutionContext?.abortSignal });
       }
-      return await this.aiService.chat(messages, activeTools);
+      return await this.aiService.chat(messages, activeTools, { abortSignal: this.toolExecutionContext?.abortSignal });
     }
   }
 
@@ -1562,6 +1577,7 @@ export class ConversationRunner {
     context: Partial<ToolExecutionContext>,
     turn: number,
   ): Promise<ToolResult> {
+    if (context.abortSignal?.aborted) return this.buildCancelledToolResult(toolCall, 'Tool execution cancelled.');
     let lastResult = await this.toolExecutor.executeTool(toolCall, messages, context);
     let retryCount = 0;
 
@@ -1572,7 +1588,9 @@ export class ConversationRunner {
       const delay = ConversationRunner.RETRY_BASE_DELAY_MS * attempt;
       const retryReason = this.describeRetryReason(lastResult);
       Logger.warning(`[${this.sessionLabel}Turn ${turn}] ${toolCall.function.name} 触发可重试工具失败 (${retryReason})，${delay}ms 后重试 (${attempt}/${ConversationRunner.MAX_RETRIES})`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      try { await cancellableDelay(delay, context.abortSignal); }
+      catch (error) { if (isCancellation(error)) return this.buildCancelledToolResult(toolCall, 'Tool retry cancelled.'); throw error; }
+      if (context.abortSignal?.aborted || this.shouldContinue && !this.shouldContinue()) return this.buildCancelledToolResult(toolCall, 'Tool retry cancelled.');
       retryCount = attempt;
       lastResult = await this.toolExecutor.executeTool(toolCall, messages, context);
     }

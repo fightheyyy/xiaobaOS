@@ -35,7 +35,7 @@ flowchart LR
 7. 提供真实 CaseSet CLI：completed。
 8. 将旧 Eval-named Test engine 文件移出 `src/eval`：completed。
 9. 建立首个维护中的真实 CaseSet：completed。
-10. 建立 Replay effect isolation：completed for default read-only and macOS clean-runtime workspace-write；其他平台 fail closed。
+10. 建立 Replay effect isolation：completed for default read-only and SDK clean-runtime workspace-write; unsupported hosts fail closed。
 
 ## Next Steps
 
@@ -63,7 +63,7 @@ flowchart LR
 
 ## Risks / Open Questions
 
-- `workspace_write` 的原生 clean-runtime sandbox 当前只支持 macOS；其他平台 fail closed。
+- `workspace_write` uses the shared SDK on supported Linux/macOS hosts; missing isolation fails closed。
 - 当前维护 CaseSet 只有三条只读 Case，尚不代表广泛 Agent 能力。
 - 旧 Test engine 的内部类型仍带少量 `Eval*` 名称；它们已被限制在 `src/testing/**`，后续随实际修改逐步收敛。
 
@@ -77,3 +77,8 @@ flowchart LR
 - `npm run test:check-scripted-runtime` passed 1 manifest / 11 cases。
 - Source Candidate、Replay isolation 与 maintained CaseSet focused tests passed 22/22 across 6 suites。
 - 旧 `src/eval` Test engine 路径引用检查为零，`git diff --check` passed。
+
+
+## Unified sandbox execution
+
+Owner: Evaluation / Runtime. Completed: Source Candidate build, ordinary tests and native-contract phase use shared SDK isolation; no candidate test code is launched directly on the host. Replay keeps its explicit workspace_write gate. Linux source-fixture build/test and shared SDK boundaries passed. Full verification and unsupported-platform limits are in `../agent-runtime/PLAN.md`.

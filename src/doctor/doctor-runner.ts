@@ -183,9 +183,13 @@ function runtimeCheck(
   platform: NodeJS.Platform,
   arch: string,
 ): ReadinessCheck {
-  const nodeMajor = Number.parseInt(nodeVersion.replace(/^v/, '').split('.')[0] || '', 10);
-  const minimumMajor = Number.parseInt(nodeEngine.match(/\d+/)?.[0] || '', 10);
-  const supported = Number.isFinite(nodeMajor) && Number.isFinite(minimumMajor) && nodeMajor >= minimumMajor;
+  const actual = nodeVersion.replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+  const minimum = nodeEngine.match(/(\d+)(?:\.(\d+))?(?:\.(\d+))?/)?.slice(1).map(value => Number(value || 0));
+  const supported = Boolean(actual && minimum && (
+    actual[0] > minimum[0] || actual[0] === minimum[0] && (
+      actual[1] > minimum[1] || actual[1] === minimum[1] && actual[2] >= minimum[2]
+    )
+  ));
   return {
     id: 'runtime.node',
     category: 'runtime',

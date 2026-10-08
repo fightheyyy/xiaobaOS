@@ -1,3 +1,4 @@
+import { isCancellation } from '../utils/cancellation';
 import * as crypto from 'crypto';
 import { Message } from '../types';
 import { AIService } from '../utils/ai-service';
@@ -19,6 +20,7 @@ import { SessionStore } from '../utils/session-store';
 import { Metrics } from '../utils/metrics';
 import { ContextCompressor, resolveCompactionThreshold } from './context-compressor';
 import { MemoryFinalizer, MemoryFinalizationReason } from '../utils/memory-finalizer';
+import { buildFileMemoryContext, FILE_MEMORY_PREFIX } from '../utils/file-memory-context';
 import { visibleHistoryFilePath } from '../utils/visible-history-paths';
 import { getObservability, ObservabilitySpan, ObservabilitySpanContext } from '../observability';
 
@@ -26,6 +28,7 @@ const TRANSIENT_SUBAGENT_STATUS_PREFIX = '[transient_subagent_status]';
 const TRANSIENT_RUNNER_HINT_PREFIX = '[transient_runner_hint]';
 const TRANSIENT_SOFT_CHECK_PREFIX = '[transient_soft_check]';
 const TRANSIENT_SKILLS_LIST_PREFIX = '[transient_skills_list]';
+const TRANSIENT_CLOCK_PREFIX = '[transient_current_clock]';
 export const BUSY_MESSAGE = '正在处理上一条消息，请稍候...';
 export const ERROR_MESSAGE = '不好意思，刚才处理出了点问题，你再试一次？';
 
@@ -89,6 +92,8 @@ export interface CommandResult {
 }
 
 export interface HandleMessageResult {
+  /** Runtime execution failed; background consumers must not mark this as successful work. */
+  failed?: boolean;
   text: string;
   visibleToUser: boolean;
   /** True when text itself should be delivered directly to the user. */
@@ -143,6 +148,7 @@ export class AgentSession {
   private wakeupReply?: (text: string) => Promise<void>;
   /** 外部请求中断当前 run（例如用户在 busy 时发送"停止"） */
   private interruptRequested = false;
+  private requestAbortController?: AbortController;
   lastActiveAt: number = Date.now();
   private sessionTurnLogger: SessionTurnLogger;
   private compressor: ContextCompressor;
@@ -280,6 +286,10 @@ export class AgentSession {
     }
   }
 
+  getWorkingDirectory(): string {
+    return this.services.toolManager?.getWorkingDirectory?.() || process.cwd();
+  }
+
   /**
    * 完整消息处理管线：记忆搜索 → AI 推理 → 工具循环 → 同步历史
    *
@@ -365,6 +375,7 @@ export class AgentSession {
 
       this.busy = true;
       this.interruptRequested = false;
+      this.requestAbortController = new AbortController();
       this.lastActiveAt = Date.now();
 
       // 检查是否需要压缩上下文
@@ -388,16 +399,24 @@ export class AgentSession {
 
         // 构建上下文消息
         let contextMessages: Message[] = [...this.messages];
+        contextMessages.splice(contextMessages.length - 1, 0, { role: 'system',
+          content: `${TRANSIENT_CLOCK_PREFIX}\n本次请求的当前时间，以此为准，不沿用历史提示词的日期。\n${PromptManager.getCurrentTimeInfo()}` });
+        try {
+          const memory = buildFileMemoryContext(this.key, this.services.toolManager?.getWorkingDirectory?.() || process.cwd());
+          if (memory) contextMessages.splice(contextMessages.length - 1, 0, memory);
+        } catch (error: any) {
+          Logger.warning(`[会话 ${this.key}] memory 读取失败，继续当前请求: ${error.code || 'MEMORY_READ_FAILED'}`);
+        }
 
         // 注入后台子智能体状态（临时上下文，不持久化）
         const subAgentManager = SubAgentManager.getInstance();
-        const subAgents = subAgentManager.listByParent(this.key);
+        const subAgents = subAgentManager.listByParent(this.key,this.services.toolManager?.getWorkingDirectory?.() || process.cwd());
         if (subAgents.length > 0) {
           const activeCount = subAgents.filter(s => (
             s.status === 'running' || s.status === 'waiting_for_input'
           )).length;
           const statusLines = subAgents.map(s => {
-            const statusLabel = s.status === 'running'
+            const statusLabel = s.status === 'interrupted' ? '已中断（先核对产物与外部结果，再派遣剩余工作）' : s.status === 'running'
               ? '运行中'
               : s.status === 'waiting_for_input'
                 ? '等待输入'
@@ -466,6 +485,7 @@ export class AgentSession {
               sessionId: this.key,
               surface,
               permissionProfile: 'strict',
+              abortSignal: this.requestAbortController.signal,
               channel,
               ...(this.services.roleName ? { roleName: this.services.roleName } : {}),
             },
@@ -487,6 +507,12 @@ export class AgentSession {
         this.providerFailureCounts.clear();
         const persistedMessages = this.removeTransientMessages(result.messages);
         this.messages = [...persistedMessages];
+        if (result.cancelled) {
+          this.sessionTurnLogger.logRuntimeEvent('session_cancelled', { surface, status:'cancelled', error_code:'CANCELLED' });
+          this.sessionTurnLogger.logTurn(logInput ?? text, '', result.toolResults.map(record => this.toSessionToolCallLog(record)), {prompt:Metrics.getSummary().totalPromptTokens,completion:Metrics.getSummary().totalCompletionTokens},result.toolVisibility,this.buildStateBoundary(surface),explicitTraceId);
+          finishSessionSpan('ok', { ...baseObservabilityAttrs, 'xiaoba.session.status':'cancelled' });
+          return {text:'',visibleToUser:this.hasDeliveredOutput(result.toolResults),finalResponseVisible:false,newMessages:result.newMessages,failed:true};
+        }
 
         // 同步 skill 激活状态
         for (const msg of result.newMessages) {
@@ -587,6 +613,11 @@ export class AgentSession {
           newMessages: result.newMessages,
         };
       } catch (err: any) {
+        if (isCancellation(err) || this.requestAbortController?.signal.aborted) {
+          this.sessionTurnLogger.logRuntimeEvent('session_cancelled', { surface, status: 'cancelled', error_code: 'CANCELLED' });
+          finishSessionSpan('ok', { ...baseObservabilityAttrs, 'xiaoba.session.status': 'cancelled' });
+          return { text: '', visibleToUser: false, finalResponseVisible: false, failed: true };
+        }
         // 不删除用户消息，而是添加一个错误回复，保持上下文连贯
         // 这样用户说"继续"时可以接上
         const providerErrorEvidence = this.toProviderErrorEvidence(err);
@@ -667,7 +698,7 @@ export class AgentSession {
           ...providerAttrs,
         }, providerErrorCode);
 
-        return { text: errorReply, visibleToUser: true, finalResponseVisible: true };
+        return { text: errorReply, visibleToUser: true, finalResponseVisible: true, failed: true };
       } finally {
         finishSessionSpan('error', {
           ...baseObservabilityAttrs,
@@ -675,6 +706,7 @@ export class AgentSession {
         }, 'Session ended before completion evidence was recorded.');
         this.saveRestorableContext();
         this.busy = false;
+        this.requestAbortController = undefined;
       }
     });
   }
@@ -1047,6 +1079,7 @@ ${conversationText}
         SessionStore.getInstance().saveContext(this.key, this.messages, this.sessionStoreType());
         try {
           const memoryUpdate = MemoryFinalizer.finalizeSession(this.key, this.messages, {
+            rootDir: this.services.toolManager?.getWorkingDirectory?.() || process.cwd(),
             reason: 'manual_archive',
             sessionType: this.sessionType || this.extractSessionType(this.key),
           });
@@ -1120,6 +1153,7 @@ ${conversationText}`;
         if (options?.finalizeMemory) {
           try {
             const memoryUpdate = MemoryFinalizer.finalizeSession(this.key, this.messages, {
+              rootDir: this.services.toolManager?.getWorkingDirectory?.() || process.cwd(),
               reason: options.finalizationReason ?? 'ttl_cleanup',
               sessionType: this.sessionType || this.extractSessionType(this.key),
             });
@@ -1149,6 +1183,7 @@ ${conversationText}`;
   requestInterrupt(): void {
     if (!this.busy) return;
     this.interruptRequested = true;
+    this.requestAbortController?.abort();
   }
 
   /** 从 DB 恢复消息（进程重启后调用） */
@@ -1179,7 +1214,7 @@ ${conversationText}`;
     const thresholdRatio = resolveCompactionThreshold();
     const thresholdTokens = Math.round(beforeUsage.maxTokens * thresholdRatio);
     try {
-      const compacted = await this.compressor.compactWithFallback(this.messages);
+      const compacted = await this.compressor.compactWithFallback(this.messages, undefined, { abortSignal: this.requestAbortController?.signal });
       const afterUsage = this.compressor.getUsageInfo(compacted);
       this.messages = compacted;
       this.sessionTurnLogger.logContextCompaction({
@@ -1428,6 +1463,8 @@ ${conversationText}`;
       if (msg.content.startsWith(TRANSIENT_RUNNER_HINT_PREFIX)) return false;
       if (msg.content.startsWith(TRANSIENT_SOFT_CHECK_PREFIX)) return false;
       if (msg.content.startsWith(TRANSIENT_SKILLS_LIST_PREFIX)) return false;
+      if (msg.content.startsWith(TRANSIENT_CLOCK_PREFIX)) return false;
+      if (msg.content.startsWith(FILE_MEMORY_PREFIX)) return false;
       return true;
     });
   }

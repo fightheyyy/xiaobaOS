@@ -1,7 +1,8 @@
+import { cancellableDelay, throwIfCancelled, isCancellation } from './cancellation';
 import { Message, ChatConfig, ChatResponse } from '../types';
 import { ConfigManager } from './config';
 import { ToolDefinition } from '../types/tool';
-import { AIProvider, StreamCallbacks } from '../providers/provider';
+import { AIProvider, StreamCallbacks, ProviderCallOptions } from '../providers/provider';
 import { AnthropicProvider } from '../providers/anthropic-provider';
 import { OpenAIProvider } from '../providers/openai-provider';
 import { OllamaProvider } from '../providers/ollama-provider';
@@ -277,15 +278,16 @@ export class AIService {
   /**
    * 普通调用（非流式），带自动重试 + 主备切换
    */
-  async chat(messages: Message[], tools?: ToolDefinition[]): Promise<ChatResponse> {
+  async chat(messages: Message[], tools?: ToolDefinition[], options?: ProviderCallOptions): Promise<ChatResponse> {
+    throwIfCancelled(options?.abortSignal);
     if (!this.providerChain.some(endpoint => this.hasUsableCredentials(endpoint))) {
       throw new Error('API密钥未配置。请先运行: xiaoba config');
     }
 
     return this.executeWithFailover(
       endpoint => this.withRetry(
-        () => this.auditedProviderCall(endpoint, messages, tools, () => endpoint.provider.chat(messages, tools)),
-        endpoint,
+        () => this.auditedProviderCall(endpoint, messages, tools, () => endpoint.provider.chat(messages, tools, options)),
+        endpoint, undefined, options?.abortSignal,
       ),
       'chat'
     );
@@ -296,7 +298,8 @@ export class AIService {
    * 默认不重试，避免部分 token 已输出后出现重复文本。
    * 如需强制开启重试，可设置 XIAOBA_STREAM_RETRY=true（需自行保证幂等）。
    */
-  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks): Promise<ChatResponse> {
+  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks, options?: ProviderCallOptions): Promise<ChatResponse> {
+    throwIfCancelled(options?.abortSignal);
     if (!this.providerChain.some(endpoint => this.hasUsableCredentials(endpoint))) {
       throw new Error('API密钥未配置。请先运行: xiaoba config');
     }
@@ -326,17 +329,17 @@ export class AIService {
                   endpoint,
                   messages,
                   tools,
-                  () => endpoint.provider.chatStream(messages, tools, streamCallbacks),
+                  () => endpoint.provider.chatStream(messages, tools, streamCallbacks, options),
                 ),
                 endpoint,
-                callbacks
+                callbacks, options?.abortSignal
               );
             }
             return await this.auditedProviderCall(
               endpoint,
               messages,
               tools,
-              () => endpoint.provider.chatStream(messages, tools, streamCallbacks),
+              () => endpoint.provider.chatStream(messages, tools, streamCallbacks, options),
             );
           } catch (error) {
             const streamError = (error instanceof Error ? error : new Error(String(error))) as StreamFailoverError;
@@ -365,6 +368,7 @@ export class AIService {
    * 统一错误处理
    */
   private wrapError(error: any, endpoint?: ProviderEndpoint): Error {
+    if (isCancellation(error)) return error;
     const provider = endpoint?.config.provider || this.config.provider;
     const model = endpoint?.config.model || this.config.model;
 
@@ -419,6 +423,7 @@ export class AIService {
    * 判断错误是否可重试
    */
   private isRetryable(error: any): boolean {
+    if (isCancellation(error)) return false;
     // HTTP 状态码可重试
     const status = this.extractStatus(error);
     if (status && RETRYABLE_STATUS_CODES.has(status)) {
@@ -448,6 +453,7 @@ export class AIService {
    * 判断错误是否可触发备模型切换
    */
   private isFailoverEligible(error: any): boolean {
+    if (isCancellation(error)) return false;
     if (this.isRetryable(error)) {
       return true;
     }
@@ -497,14 +503,16 @@ export class AIService {
   /**
    * 带指数退避的重试包装器
    */
-  private async withRetry<T>(fn: () => Promise<T>, endpoint: ProviderEndpoint, callbacks?: StreamCallbacks): Promise<T> {
+  private async withRetry<T>(fn: () => Promise<T>, endpoint: ProviderEndpoint, callbacks?: StreamCallbacks, signal?: AbortSignal): Promise<T> {
     let lastError: any;
     const maxRetries = arenaLiveAuditEnabled() ? 0 : MAX_RETRIES;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        throwIfCancelled(signal);
         return await fn();
       } catch (error: any) {
+        if (isCancellation(error)) throw error;
         lastError = error;
 
         if (attempt >= maxRetries || !this.isRetryable(error)) {
@@ -528,7 +536,7 @@ export class AIService {
           + `[${endpoint.label}:${endpoint.config.provider}/${endpoint.config.model || 'default'}]`
         );
 
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await cancellableDelay(delay, signal);
       }
     }
 
@@ -571,6 +579,7 @@ export class AIService {
       try {
         return await execute(endpoint);
       } catch (error: any) {
+        if (isCancellation(error)) throw error;
         lastError = error;
         const hasNext = i < this.providerChain.length - 1;
         const allowFailover = hasNext && (shouldFailover

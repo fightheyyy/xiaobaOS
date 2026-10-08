@@ -107,6 +107,10 @@ export interface ToolDefinition {
    * 例如 pause_turn 会显式结束当前这一轮推理，等待新的外部事件。
    */
   controlMode?: ToolControlMode;
+  /** Runtime-enforced confirmation for app writes, independent of a role package. */
+  requiresConfirmation?: boolean;
+  /** Bind these argument fields to the complete JSON proposal, including nested keys. */
+  confirmationPayloadKeys?: string[];
 }
 
 /**
@@ -188,6 +192,8 @@ export interface SubAgentServiceFactoryResult {
  */
 export interface ToolExecutionContext {
   workingDirectory: string;
+  /** Runtime-owned SDK execution policy; never populated from model arguments. */
+  sandboxPolicy?: import('../sandbox/policy').SandboxPolicy;
   conversationHistory: any[];
   sessionId?: string;
   /** Trusted parent session identity injected by the runtime for child agents. */
@@ -195,6 +201,8 @@ export interface ToolExecutionContext {
   surface?: ToolSurface;
   permissionProfile?: ToolPermissionProfile;
   runId?: string;
+  /** Trusted tool call identity injected by ToolManager; never a model argument. */
+  toolCallId?: string;
   abortSignal?: AbortSignal;
   activeSkillName?: string;
   activeToolsets?: string[];
@@ -215,6 +223,8 @@ export interface ToolExecutionContext {
 export interface Tool {
   definition: ToolDefinition;
   execute(args: any, context: ToolExecutionContext): Promise<string | ContentBlock[] | ToolExecutionOutput>;
+  /** Trusted runtime availability; execution must still enforce the same authorization. */
+  isAvailable?(context: Partial<ToolExecutionContext>): boolean;
   /**
    * Optional tool-owned artifact evidence. Prefer this over ToolManager output
    * inference when the tool knows exactly which artifacts it created/updated.

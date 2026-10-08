@@ -6,12 +6,7 @@ export type ArenaTrustLevel = 'untrusted' | 'review_required' | 'reviewed' | 'pr
 
 export type ArenaAllowedRuntime = 'arena_only' | 'production_candidate' | 'production';
 
-export type ArenaSandboxEngine =
-  | 'macos_seatbelt'
-  | 'linux_bubblewrap'
-  | 'windows_native'
-  | 'local_spawn'
-  | 'none';
+export type ArenaSandboxEngine = 'anthropic_sdk';
 
 export type ArenaSandboxMode = 'metadata_only' | 'read_only' | 'workspace_write';
 
@@ -103,7 +98,7 @@ export interface ArenaCleanRuntimeLaunch {
   env: Record<string, string>;
   pass_through_env: string[];
   shell_command: string;
-  sandbox_profile_path?: string;
+  sandbox_policy_path?: string;
   sandbox_shell_command?: string;
 }
 

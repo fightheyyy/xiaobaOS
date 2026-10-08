@@ -1,3 +1,4 @@
+import { registerReminderRoute, startReminderPolling, reminderCheckMessage } from '../events';
 import * as readline from 'readline';
 import ora from 'ora';
 import { Logger } from '../utils/logger';
@@ -128,25 +129,25 @@ export async function chatCommand(options: CommandOptions): Promise<void> {
 
 export function registerCliSubAgentCallbacks(
   session: AgentSession,
-  renderFeedback: (session: AgentSession, text: string) => Promise<void> = sendSingleMessage,
+  renderFeedback: (session: AgentSession, text: string) => Promise<void> = (current, text) => sendSingleMessage(current, text, { throwOnFailure: true }),
 ): CliSubAgentFeedbackHandle {
   let feedbackQueue: Promise<void> = Promise.resolve();
   let feedbackGeneration = 0;
   let disposed = false;
-  const enqueue = (text: string): Promise<void> => {
-    if (disposed) return Promise.resolve();
+  const enqueue = (text: string, propagateFailure = false): Promise<void> => {
+    if (disposed) return propagateFailure ? Promise.reject(new Error('REMINDER_CLI_CLOSED')) : Promise.resolve();
     feedbackGeneration += 1;
     const current = feedbackQueue.then(async () => {
       while (!disposed && session.isBusy()) {
         await new Promise(resolve => setTimeout(resolve, 25));
       }
-      if (disposed) return;
+      if (disposed) { if (propagateFailure) throw new Error('REMINDER_CLI_CLOSED'); return; }
       await renderFeedback(session, text);
     });
     feedbackQueue = current.catch(error => {
       Logger.warning(`CLI 处理子智能体反馈失败: ${error?.message || error}`);
     });
-    return feedbackQueue;
+    return propagateFailure ? current : feedbackQueue;
   };
 
   const platformCallbacks = {
@@ -154,12 +155,30 @@ export function registerCliSubAgentCallbacks(
   };
   SubAgentManager.getInstance().registerPlatformCallbacks(session.key, platformCallbacks);
 
+  const root = session.getWorkingDirectory?.() || process.cwd();
+  const unregisterReminder = registerReminderRoute(root, 'cli', {
+    available: record => !disposed && record.sessionKey === session.key && !session.isBusy(),
+    consume: async record => {
+      if (disposed) throw new Error('REMINDER_CLI_CLOSED');
+      if (record.mode === 'check') await enqueue(reminderCheckMessage(record), true);
+      else {
+        console.log('\n' + record.purpose + '\n');
+        await recordVisibleAssistant({ surface: 'cli', sessionKey: session.key,
+          traceId: reserveConversationTraceId('cli', session.key), content: [{ type: 'text', text: record.purpose }], deliveryKey: `reminder:${record.id}:${record.revision}` });
+        session.injectContext?.(`[scheduled_reminder_delivered] ${record.id}: ${record.purpose}`);
+      }
+    },
+  });
+  const stopReminderPoll = startReminderPolling(root, error => Logger.warning(`CLI 定时唤醒失败: ${String(error)}`));
+
   return {
     enqueue,
     generation: () => feedbackGeneration,
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      stopReminderPoll();
+      unregisterReminder();
       SubAgentManager.getInstance().unregisterPlatformCallbacks(session.key, platformCallbacks);
     },
     drain: async () => {
@@ -318,7 +337,7 @@ function createStreamingCallbacks(spinner: ora.Ora): { callbacks: SessionCallbac
 export async function sendSingleMessage(
   session: AgentSession,
   message: string,
-  options: { recordInbound?: boolean; roleName?: string; traceId?: string; traceparent?: string } = {},
+  options: { recordInbound?: boolean; roleName?: string; traceId?: string; traceparent?: string; throwOnFailure?: boolean } = {},
 ): Promise<void> {
   const turn = options.recordInbound === true
     ? await recordVisibleInbound({
@@ -350,6 +369,7 @@ export async function sendSingleMessage(
     console.log('\n' + result.text + '\n');
   }
   await recordCliReply(turn, result.text, options.roleName, 'cli:direct');
+  if (options.throwOnFailure && result.failed) throw new Error('REMINDER_SESSION_RUN_FAILED');
 }
 
 async function interactiveChat(

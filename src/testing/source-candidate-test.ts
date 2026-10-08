@@ -1,6 +1,7 @@
-import { spawn } from 'child_process';
+import { sandboxExecutor } from '../sandbox/executor';
+import { createSandboxPolicy, shellQuote } from '../sandbox/policy';
+import type { SandboxPolicy } from '../sandbox/policy';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { CandidateTestResult } from '../roles/evolution-cat/evolution-workflow';
 import { validateSourceCandidate } from '../roles/evolution-cat/source-candidate';
@@ -98,8 +99,8 @@ export async function runSourceCandidateTest(input: {
       .filter(filePath => fs.existsSync(filePath));
     const nativeSandboxTests = nativeTestPaths.length === 0
       ? successfulExecution('No native sandbox test files in this source fixture')
-      : await runNodeProcess({
-          command: process.execPath,
+      : await runSandboxedNode({
+          profile_path: sandbox.profile_path,
           args: [
             require.resolve('tsx/cli'),
             '--test',
@@ -173,67 +174,23 @@ function createSourceTestSandbox(input: {
   tmp_root: string;
   short_runtime_root: string;
 } {
-  if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) {
-    throw new Error('Source Candidate Test requires an enforced native sandbox');
-  }
   const sandboxRoot = path.join(input.out_dir, 'sandbox');
   const homeRoot = path.join(sandboxRoot, 'home');
   const tmpRoot = path.join(sandboxRoot, 'tmp');
   fs.mkdirSync(homeRoot, { recursive: true });
   fs.mkdirSync(tmpRoot, { recursive: true });
   const shortRuntimeRoot = fs.mkdtempSync('/tmp/xst-');
-  const profilePath = path.join(sandboxRoot, 'source-candidate.sb');
-  const readRoots = uniqueExistingPaths([
-    input.candidate_root,
-    input.out_dir,
-    homeRoot,
-    tmpRoot,
-    shortRuntimeRoot,
-    path.join(input.source_root, 'node_modules'),
-    path.dirname(process.execPath),
-    '/dev',
-    '/System',
-    '/Library',
-    '/usr',
-    '/bin',
-    '/sbin',
-    '/etc',
-    '/private/etc',
-    '/private/var/db/timezone',
-    '/var/db/timezone',
-    '/opt/homebrew',
-  ]);
-  const writeRoots = uniqueExistingPaths([
-    input.candidate_root,
-    input.out_dir,
-    homeRoot,
-    tmpRoot,
-    shortRuntimeRoot,
-  ]);
-  const protectedReadRoots = uniqueExistingPaths([
-    os.homedir(),
-    input.source_root,
-  ]);
-  const profile = [
-    '(version 1)',
-    '(deny default)',
-    '(allow process*)',
-    '(allow signal (target same-sandbox))',
-    '(allow mach-lookup)',
-    '(allow sysctl*)',
-    '(allow file-map-executable)',
-    '(allow file-read-metadata)',
-    '(allow file-read*)',
-    ...protectedReadRoots.map(value => `(deny file-read* (subpath ${seatbeltString(value)}))`),
-    ...readRoots.map(value => `(allow file-read* (subpath ${seatbeltString(value)}))`),
-    '(allow file-write-data (subpath "/dev"))',
-    ...writeRoots.map(value => `(allow file-write* (subpath ${seatbeltString(value)}))`),
-    // Runtime tests use loopback HTTP servers. No provider credentials are
-    // inherited into this process.
-    '(allow network*)',
-    '',
-  ].join('\n');
-  fs.writeFileSync(profilePath, profile, 'utf-8');
+  const profilePath = path.join(sandboxRoot, 'anthropic-policy.json');
+  const policy = createSandboxPolicy({
+    cwd: input.candidate_root, scratchRoot: sandboxRoot,
+    readRoots: [input.candidate_root, input.out_dir, shortRuntimeRoot, path.join(input.source_root, 'node_modules')],
+    writeRoots: [input.candidate_root, input.out_dir, shortRuntimeRoot],
+    denyRead: [input.source_root],
+    allowLocalBinding: true,
+    allowedDomains: ['localhost', '127.0.0.1', '[::1]'],
+  });
+  policy.config.filesystem.denyWrite.push({ path: profilePath, literal: true });
+  fs.writeFileSync(profilePath, JSON.stringify(policy, null, 2), 'utf8');
   return {
     profile_path: profilePath,
     home_root: homeRoot,
@@ -250,82 +207,20 @@ interface SandboxedExecution {
   error?: Error;
 }
 
-function runSandboxedNode(input: {
+async function runSandboxedNode(input: {
   profile_path: string;
   cwd: string;
   environment: NodeJS.ProcessEnv;
   args: string[];
   timeout_ms: number;
 }): Promise<SandboxedExecution> {
-  return runNodeProcess({
-    command: '/usr/bin/sandbox-exec',
-    args: ['-f', input.profile_path, process.execPath, ...input.args],
-    cwd: input.cwd,
-    environment: input.environment,
-    timeout_ms: input.timeout_ms,
+  const policy = JSON.parse(fs.readFileSync(input.profile_path, 'utf8')) as SandboxPolicy;
+  const execution = await sandboxExecutor.execute({
+    policy, command: [process.execPath, ...input.args].map(shellQuote).join(' '),
+    environment: input.environment, timeoutMs: input.timeout_ms, maxOutputBytes: 64 * 1024 * 1024,
   });
-}
-
-function runNodeProcess(input: {
-  command: string;
-  args: string[];
-  cwd: string;
-  environment: NodeJS.ProcessEnv;
-  timeout_ms: number;
-}): Promise<SandboxedExecution> {
-  return new Promise(resolve => {
-    const child = spawn(
-      input.command,
-      input.args,
-      {
-        cwd: input.cwd,
-        env: input.environment,
-        detached: process.platform !== 'win32',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    const maxBuffer = 64 * 1024 * 1024;
-    let outputBytes = 0;
-    let forcedError: Error | undefined;
-    let settled = false;
-
-    const stop = (error: Error) => {
-      if (forcedError) return;
-      forcedError = error;
-      terminateProcessGroup(child.pid);
-    };
-    const collect = (target: Buffer[], value: Buffer) => {
-      outputBytes += value.length;
-      if (outputBytes > maxBuffer) {
-        stop(new Error('Source Candidate Test output exceeded 64 MiB'));
-        return;
-      }
-      target.push(value);
-    };
-    child.stdout?.on('data', value => collect(stdout, Buffer.from(value)));
-    child.stderr?.on('data', value => collect(stderr, Buffer.from(value)));
-    child.once('error', error => {
-      forcedError = error;
-    });
-    const timeout = setTimeout(() => {
-      stop(new Error(`Source Candidate Test timed out after ${input.timeout_ms}ms`));
-    }, input.timeout_ms);
-
-    child.once('close', (status, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve({
-        status,
-        signal,
-        stdout: Buffer.concat(stdout).toString('utf-8'),
-        stderr: Buffer.concat(stderr).toString('utf-8'),
-        ...(forcedError ? { error: forcedError } : {}),
-      });
-    });
-  });
+  if (execution.errorCode === 'SANDBOX_UNAVAILABLE') throw execution.error || new Error('Sandbox unavailable.');
+  return execution;
 }
 
 function sourceTestEnvironment(
@@ -341,6 +236,7 @@ function sourceTestEnvironment(
       path.join(sourceRoot, 'node_modules', '.bin'),
       '/opt/homebrew/bin',
       '/usr/local/bin',
+      ...(process.env.PATH || '').split(path.delimiter),
       '/usr/bin',
       '/bin',
       '/usr/sbin',
@@ -380,23 +276,6 @@ function successfulExecution(message: string): SandboxedExecution {
   };
 }
 
-function terminateProcessGroup(pid: number | undefined): void {
-  if (pid && process.platform !== 'win32') {
-    try {
-      process.kill(-pid, 'SIGKILL');
-      return;
-    } catch {
-      // The group may have exited between the timeout and the signal.
-    }
-  }
-  if (!pid) return;
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch {
-    // The direct child may already be gone.
-  }
-}
-
 function writeResult(input: {
   resultPath: string;
   candidate: Readonly<Candidate>;
@@ -419,19 +298,4 @@ function writeResult(input: {
     reasons: result.reasons,
   }, null, 2)}\n`, 'utf-8');
   return result;
-}
-
-function uniqueExistingPaths(values: readonly string[]): string[] {
-  const result = new Set<string>();
-  for (const value of values) {
-    const resolved = path.resolve(value);
-    if (!fs.existsSync(resolved)) continue;
-    result.add(resolved);
-    result.add(fs.realpathSync.native(resolved));
-  }
-  return [...result];
-}
-
-function seatbeltString(value: string): string {
-  return `"${path.resolve(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }

@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { sandboxAxiosProxy } from './sandbox-proxy';
 import { Message, ChatConfig, ChatResponse, ContentBlock } from '../types';
 import { ToolDefinition } from '../types/tool';
-import { AIProvider, StreamCallbacks } from './provider';
+import { AIProvider, StreamCallbacks, ProviderCallOptions } from './provider';
 import { ContextDebugLogger } from '../utils/context-debug-logger';
 
 /**
@@ -92,13 +93,13 @@ export class OpenAIProvider implements AIProvider {
   /**
    * 普通调用
    */
-  async chat(messages: Message[], tools?: ToolDefinition[]): Promise<ChatResponse> {
+  async chat(messages: Message[], tools?: ToolDefinition[], options?: ProviderCallOptions): Promise<ChatResponse> {
     const body = this.buildRequestBody(messages, tools, false);
     ContextDebugLogger.dumpSdkBoundary('before', undefined, {
       apiUrl: this.apiUrl,
       body,
     });
-    const response = await axios.post(this.apiUrl, body, { headers: this.headers });
+    const response = await axios.post(this.apiUrl, body, { headers: this.headers, ...sandboxAxiosProxy(), signal: options?.abortSignal });
     const message = response.data.choices[0].message;
     const usage = response.data.usage;
 
@@ -120,7 +121,7 @@ export class OpenAIProvider implements AIProvider {
   /**
    * 流式调用（SSE）
    */
-  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks): Promise<ChatResponse> {
+  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks, options?: ProviderCallOptions): Promise<ChatResponse> {
     const body = this.buildRequestBody(messages, tools, true);
 
     ContextDebugLogger.dumpSdkBoundary('before', undefined, {
@@ -129,8 +130,10 @@ export class OpenAIProvider implements AIProvider {
     });
 
     const response = await axios.post(this.apiUrl, body, {
+      ...sandboxAxiosProxy(),
       headers: this.headers,
       responseType: 'stream',
+      signal: options?.abortSignal,
     });
 
     return new Promise<ChatResponse>((resolve, reject) => {

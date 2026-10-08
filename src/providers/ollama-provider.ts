@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { sandboxAxiosProxy } from './sandbox-proxy';
 import { Message, ChatConfig, ChatResponse } from '../types';
 import { ToolDefinition } from '../types/tool';
-import { AIProvider, StreamCallbacks } from './provider';
+import { AIProvider, StreamCallbacks, ProviderCallOptions } from './provider';
 import { ContextDebugLogger } from '../utils/context-debug-logger';
 
 interface OllamaToolCall {
@@ -249,14 +250,14 @@ export class OllamaProvider implements AIProvider {
     };
   }
 
-  async chat(messages: Message[], tools?: ToolDefinition[]): Promise<ChatResponse> {
+  async chat(messages: Message[], tools?: ToolDefinition[], options?: ProviderCallOptions): Promise<ChatResponse> {
     const body = this.buildRequestBody(messages, tools, false);
     ContextDebugLogger.dumpSdkBoundary('before', undefined, {
       apiUrl: this.apiUrl,
       body,
     });
 
-    const response = await axios.post(this.apiUrl, body, { headers: this.headers });
+    const response = await axios.post(this.apiUrl, body, { headers: this.headers, ...sandboxAxiosProxy(), signal: options?.abortSignal });
 
     ContextDebugLogger.dumpSdkBoundary('after', undefined, {
       response: response.data,
@@ -265,7 +266,7 @@ export class OllamaProvider implements AIProvider {
     return this.parseResponse(response.data);
   }
 
-  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks): Promise<ChatResponse> {
+  async chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks, options?: ProviderCallOptions): Promise<ChatResponse> {
     const body = this.buildRequestBody(messages, tools, true);
     ContextDebugLogger.dumpSdkBoundary('before', undefined, {
       apiUrl: this.apiUrl,
@@ -273,8 +274,10 @@ export class OllamaProvider implements AIProvider {
     });
 
     const response = await axios.post(this.apiUrl, body, {
+      ...sandboxAxiosProxy(),
       headers: this.headers,
       responseType: 'stream',
+      signal: options?.abortSignal,
     });
 
     return new Promise<ChatResponse>((resolve, reject) => {

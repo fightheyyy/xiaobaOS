@@ -87,8 +87,7 @@ export function registerArenaCommand(program: Command): void {
     .option('--max-turns <n>', 'Scenario turn budget, default 4')
     .option('--replay-attempts <n>', 'shared Eval runs per generated Case, default 3')
     .option('--dry-run', 'write the sandboxed runner command without executing it')
-    .option('--allow-unsandboxed', 'debug only: allow execution when no sandbox_shell_command is available')
-    .option('--sandbox-engine <engine>', 'macos_seatbelt|linux_bubblewrap|windows_native|local_spawn|none')
+    .option('--sandbox-engine <engine>', 'anthropic_sdk')
     .option('--sandbox-mode <mode>', 'metadata_only|read_only|workspace_write')
     .option('--sandbox-workspace <path>', 'sandbox workspace root')
     .option('--sandbox-subject-root <path>', 'sandbox subject root')
@@ -114,7 +113,6 @@ export function registerArenaCommand(program: Command): void {
         maxTurns: parseOptionalPositiveInt(options.maxTurns, '--max-turns'),
         replayAttempts: parseOptionalPositiveInt(options.replayAttempts, '--replay-attempts'),
         dryRun: options.dryRun === true,
-        allowUnsandboxed: options.allowUnsandboxed === true,
         sandbox: parseSandboxOptions(options),
       });
       printJson({
@@ -209,8 +207,7 @@ export function registerArenaCommand(program: Command): void {
     .option('--max-turns <n>', 'Scenario turn budget, default 4')
     .option('--replay-attempts <n>', 'shared Eval runs per generated Case, default 3')
     .option('--dry-run', 'write the sandboxed runner command without executing it')
-    .option('--allow-unsandboxed', 'debug only: allow execution when no sandbox_shell_command is available')
-    .option('--sandbox-engine <engine>', 'macos_seatbelt|linux_bubblewrap|windows_native|local_spawn|none')
+    .option('--sandbox-engine <engine>', 'anthropic_sdk')
     .option('--sandbox-mode <mode>', 'metadata_only|read_only|workspace_write')
     .option('--sandbox-workspace <path>', 'sandbox workspace root')
     .option('--sandbox-subject-root <path>', 'sandbox subject root')
@@ -230,7 +227,6 @@ export function registerArenaCommand(program: Command): void {
         maxTurns: parseOptionalPositiveInt(options.maxTurns, '--max-turns'),
         replayAttempts: parseOptionalPositiveInt(options.replayAttempts, '--replay-attempts'),
         dryRun: options.dryRun === true,
-        allowUnsandboxed: options.allowUnsandboxed === true,
         sandbox: parseSandboxOptions(options),
       });
       printJson(result.result || result);
@@ -275,7 +271,7 @@ export function registerArenaCommand(program: Command): void {
     .option('--surface <name>', 'surface used by UserCat, default pet')
     .option('--pass-env <name>', 'environment variable name to pass through; repeatable', collectOption, [])
     .option('--workspace-seed <path>', 'directory copied into the clean Arena workspace')
-    .option('--sandbox-engine <engine>', 'macos_seatbelt|linux_bubblewrap|windows_native|local_spawn|none')
+    .option('--sandbox-engine <engine>', 'anthropic_sdk')
     .option('--sandbox-mode <mode>', 'metadata_only|read_only|workspace_write')
     .option('--sandbox-workspace <path>', 'sandbox workspace root')
     .option('--sandbox-subject-root <path>', 'sandbox subject root')
@@ -356,7 +352,6 @@ interface ArenaRunExecuteOptions extends ArenaSandboxOptionSet {
   maxTurns?: string;
   replayAttempts?: string;
   dryRun?: boolean;
-  allowUnsandboxed?: boolean;
 }
 
 interface ArenaSkillEvaluateOptions extends ArenaSandboxOptionSet {
@@ -369,7 +364,6 @@ interface ArenaSkillEvaluateOptions extends ArenaSandboxOptionSet {
   maxTurns?: string;
   replayAttempts?: string;
   dryRun?: boolean;
-  allowUnsandboxed?: boolean;
 }
 
 interface ArenaRunWorkerOptions {
@@ -556,9 +550,8 @@ function parseSandboxOptions(options: ArenaSandboxOptionSet): PrepareArenaRuntim
 }
 
 function parseSandboxEngine(value: string): ArenaSandboxEngine {
-  const allowed: ArenaSandboxEngine[] = ['macos_seatbelt', 'linux_bubblewrap', 'windows_native', 'local_spawn', 'none'];
-  if (allowed.includes(value as ArenaSandboxEngine)) return value as ArenaSandboxEngine;
-  throw new Error(`invalid sandbox engine: ${value}`);
+  if (['anthropic_sdk', 'macos_seatbelt', 'linux_bubblewrap'].includes(value)) return 'anthropic_sdk';
+  throw new Error(`Unsupported sandbox engine: ${value}. Use anthropic_sdk.`);
 }
 
 function parseSandboxMode(value: string): ArenaSandboxMode {

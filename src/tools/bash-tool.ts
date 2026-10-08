@@ -1,11 +1,12 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import * as fs from 'fs';
+import * as path from 'path';
+import { sandboxExecutor } from '../sandbox/executor';
+import { toolSandboxPolicy } from '../sandbox/tool-execution';
 import { Tool, ToolDefinition, ToolExecutionContext, ToolExecutionOutput } from '../types/tool';
 import { Logger } from '../utils/logger';
 import { isToolAllowed, isBashCommandAllowed } from '../utils/safety';
 import { toolBlocked, toolFailure, toolSuccess, toolTimeout } from './tool-result';
 
-const execAsync = promisify(exec);
 
 /**
  * Shell 工具 - 执行 shell 命令
@@ -65,12 +66,18 @@ export class ShellTool implements Tool {
     const startTime = Date.now();
 
     try {
-      const { stdout, stderr } = await execAsync(command, {
-        cwd: context.workingDirectory,
-        encoding: 'utf-8',
-        timeout: timeout,
-        maxBuffer: 10 * 1024 * 1024, // 10MB
-      });
+      const policy = toolSandboxPolicy(context);
+      let execution;
+      try {
+        execution = await sandboxExecutor.execute({ policy, command, timeoutMs: timeout, abortSignal: context.abortSignal, inheritExistingSandbox: !context.sandboxPolicy });
+      } finally {
+        if (!context.sandboxPolicy) fs.rmSync(path.dirname(policy.home), { recursive: true, force: true });
+      }
+      if (execution.errorCode === 'SANDBOX_UNAVAILABLE') return toolBlocked(execution.error?.message || execution.stderr, 'SANDBOX_UNAVAILABLE', execution.error?.message || 'Sandbox is unavailable.');
+      if (execution.errorCode === 'SANDBOX_CANCELLED') return { toolContent: '命令执行已取消。', status: 'cancelled', error_code: execution.errorCode, retryable: false };
+      if (execution.errorCode === 'SANDBOX_TIMEOUT') return toolTimeout(execution.error?.message || 'Sandbox command timed out.');
+      if (execution.status !== 0 || execution.errorCode) return toolFailure(execution.stderr || execution.error?.message || `Command exited with status ${execution.status}`, execution.errorCode || 'COMMAND_FAILED');
+      const { stdout, stderr } = execution;
 
       const output = stdout || '';
       if (stderr) {

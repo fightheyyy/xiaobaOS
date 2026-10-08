@@ -1,3 +1,4 @@
+import { createSandboxPolicy } from '../sandbox/policy';
 import { Message } from '../types';
 import { AIService } from '../utils/ai-service';
 import { ToolManager } from '../tools/tool-manager';
@@ -12,16 +13,16 @@ import {
 import { ConversationRunner, RunnerCallbacks, RunToolResult } from './conversation-runner';
 import { createRoleAwareToolManager } from '../bootstrap/tool-manager';
 import { PromptManager } from '../utils/prompt-manager';
+import { buildFileMemoryContext } from '../utils/file-memory-context';
 import { Logger } from '../utils/logger';
 import { buildCanonicalToolResult } from '../tools/tool-result';
 import { SessionTurnLogger } from '../utils/session-turn-logger';
 import { isWritePathWithinRoot } from '../utils/safety';
-import * as fs from 'fs';
 import * as path from 'path';
 
 // ─── 类型定义 ───────────────────────────────────────────
 
-export type SubAgentStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'waiting_for_input';
+export type SubAgentStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'waiting_for_input' | 'interrupted';
 
 export type SubAgentSkillSelectionMode = 'preselected' | 'subagent_decides' | 'none';
 
@@ -38,6 +39,7 @@ export interface SubAgentInfo {
   progressLog: string[];
   /** 最终结果摘要 */
   resultSummary?: string;
+  recoveryNote?: string;
   /** 子智能体挂起时的待确认问题 */
   pendingQuestion?: string;
   /** 子智能体执行期间创建的产出文件路径 */
@@ -45,6 +47,10 @@ export interface SubAgentInfo {
 }
 
 export interface SubAgentSpawnOptions {
+  /** Runtime-owned state journal callback; no new execution authority. */
+  onStateChange?: (info: SubAgentInfo) => void;
+  /** Narrow runtime-owned turn budget; normal role dispatch keeps the existing default. */
+  maxTurns?: number;
   skillName?: string;
   taskDescription: string;
   userMessage: string;
@@ -61,11 +67,14 @@ export interface SubAgentSpawnOptions {
   parentSessionId?: string;
   /** Runtime-owned hard denylist for narrow workflows such as formal replay. */
   hiddenTools?: string[];
+  /** An empty allowlist makes proposal-only workflows unable to call any tools. */
+  allowedTools?: string[];
   /** Optional runtime-owned write boundary. When omitted, normal role write semantics are unchanged. */
   allowedWriteRoot?: string;
 }
 
 const SUB_AGENT_ALWAYS_HIDDEN_TOOLS = new Set([
+  'schedule_reminder',
   'spawn_subagent',
   'check_subagent',
   'stop_subagent',
@@ -94,6 +103,7 @@ export class SubAgentToolExecutor implements ToolExecutor {
     private readonly options: {
       allowSkillTool?: boolean;
       hiddenTools?: Iterable<string>;
+      allowedTools?: string[];
       allowedWriteRoot?: string;
       workingDirectory?: string;
     } = {},
@@ -130,13 +140,25 @@ export class SubAgentToolExecutor implements ToolExecutor {
     const writeBoundaryResult = this.validateWriteBoundary(toolCall, canonicalName, contextOverrides);
     if (writeBoundaryResult) return writeBoundaryResult;
 
-    const boundedShell = this.boundShellToWriteRoot(toolCall, canonicalName, contextOverrides);
-    if ('result' in boundedShell) return boundedShell.result;
-    return this.inner.executeTool(boundedShell.toolCall, conversationHistory, contextOverrides);
+    if (this.options.allowedWriteRoot && canonicalName === 'execute_shell') {
+      const cwd = contextOverrides?.workingDirectory || this.options.workingDirectory || this.options.allowedWriteRoot;
+      const permission = isWritePathWithinRoot('.', cwd, this.options.allowedWriteRoot);
+      if (!permission.allowed) return buildCanonicalToolResult({ tool_call_id: toolCall.id, name: canonicalName,
+        content: permission.reason || 'Shell 工作目录超出隔离写入根目录。', status: 'blocked', errorCode: 'PATH_DENIED', retryable: false });
+    }
+
+    const sandboxPolicy = this.options.allowedWriteRoot ? createSandboxPolicy({
+      cwd: this.options.allowedWriteRoot,
+      scratchRoot: path.join(this.options.allowedWriteRoot, 'output', '.xiaoba-sandbox'),
+      readRoots: [...(process.env.NODE_PATH || '').split(path.delimiter).filter(Boolean), path.resolve(__dirname, '..'), path.resolve(__dirname, '../../node_modules')],
+      writeRoots: [this.options.allowedWriteRoot],
+    }) : undefined;
+    return this.inner.executeTool(toolCall, conversationHistory, { ...contextOverrides, ...(sandboxPolicy ? { sandboxPolicy } : {}) });
   }
 
   private isHiddenTool(toolName: string): boolean {
     const canonicalName = this.canonicalToolName(toolName);
+    if (this.options.allowedTools && !this.options.allowedTools.includes(canonicalName)) return true;
     if (SUB_AGENT_ALWAYS_HIDDEN_TOOLS.has(canonicalName)) {
       return true;
     }
@@ -188,134 +210,9 @@ export class SubAgentToolExecutor implements ToolExecutor {
     });
   }
 
-  private boundShellToWriteRoot(
-    toolCall: ToolCall,
-    canonicalName: string,
-    contextOverrides?: Partial<ToolExecutionContext>,
-  ): { toolCall: ToolCall } | { result: ToolResult } {
-    if (!this.options.allowedWriteRoot || canonicalName !== 'execute_shell') {
-      return { toolCall };
-    }
-    if (process.platform !== 'darwin' || !fs.existsSync('/usr/bin/sandbox-exec')) {
-      return {
-        result: blockedToolResult(
-          toolCall,
-          canonicalName,
-          'WRITE_SANDBOX_UNAVAILABLE',
-          '隔离子会话的 Shell 只允许在 macOS Seatbelt 可用时执行。',
-        ),
-      };
-    }
-
-    let args: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(toolCall.function.arguments);
-      if (!parsed || typeof parsed !== 'object') return { toolCall };
-      args = parsed as Record<string, unknown>;
-    } catch {
-      return { toolCall };
-    }
-    if (typeof args.command !== 'string' || !args.command.trim()) return { toolCall };
-
-    try {
-      const allowedRoot = fs.realpathSync(path.resolve(this.options.allowedWriteRoot));
-      const workingDirectory = fs.realpathSync(path.resolve(
-        contextOverrides?.workingDirectory || this.options.workingDirectory || allowedRoot,
-      ));
-      const cwdPermission = isWritePathWithinRoot('.', workingDirectory, allowedRoot);
-      if (!cwdPermission.allowed) {
-        return {
-          result: blockedToolResult(
-            toolCall,
-            canonicalName,
-            'PATH_DENIED',
-            cwdPermission.reason || 'Shell 工作目录超出隔离写入根目录。',
-          ),
-        };
-      }
-      const runtimeRoot = path.join(allowedRoot, 'output', '.xiaoba-shell-sandbox');
-      const homeRoot = path.join(runtimeRoot, 'home');
-      const tempRoot = path.join(runtimeRoot, 'tmp');
-      fs.mkdirSync(homeRoot, { recursive: true });
-      fs.mkdirSync(tempRoot, { recursive: true });
-      const profile = buildWriteRootSeatbeltProfile(allowedRoot);
-      const command = [
-        'env',
-        `HOME=${shellQuote(homeRoot)}`,
-        `TMPDIR=${shellQuote(tempRoot)}`,
-        'XIAOBA_WRITE_SANDBOXED=1',
-        '/usr/bin/sandbox-exec',
-        '-p',
-        shellQuote(profile),
-        '/bin/zsh',
-        '-lc',
-        shellQuote(args.command),
-      ].join(' ');
-      return {
-        toolCall: {
-          ...toolCall,
-          function: {
-            ...toolCall.function,
-            arguments: JSON.stringify({ ...args, command }),
-          },
-        },
-      };
-    } catch (error: any) {
-      return {
-        result: blockedToolResult(
-          toolCall,
-          canonicalName,
-          'WRITE_SANDBOX_FAILED',
-          `无法建立隔离 Shell: ${error?.message || String(error)}`,
-        ),
-      };
-    }
-  }
-
   private canonicalToolName(toolName: string): string {
     return SUB_AGENT_TOOL_ALIASES[toolName] ?? toolName;
   }
-}
-
-function blockedToolResult(
-  toolCall: ToolCall,
-  name: string,
-  errorCode: string,
-  reason: string,
-): ToolResult {
-  return buildCanonicalToolResult({
-    tool_call_id: toolCall.id,
-    name,
-    content: `执行被阻止: ${reason}`,
-    status: 'blocked',
-    errorCode,
-    blockedReason: reason,
-    retryable: false,
-  });
-}
-
-function buildWriteRootSeatbeltProfile(allowedRoot: string): string {
-  return [
-    '(version 1)',
-    '(deny default)',
-    '(allow process*)',
-    '(allow mach-lookup)',
-    '(allow sysctl*)',
-    '(allow file-map-executable)',
-    '(allow file-read-metadata)',
-    '(allow file-read*)',
-    '(allow file-write-data (subpath "/dev"))',
-    `(allow file-write* (subpath ${seatbeltString(allowedRoot)}))`,
-    '(allow network*)',
-  ].join('\n');
-}
-
-function seatbeltString(value: string): string {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 export function createSubAgentToolManager(
@@ -347,6 +244,7 @@ export function createSubAgentToolExecutor(
     parentSessionId?: string;
     abortSignal?: AbortSignal;
     hiddenTools?: string[];
+    allowedTools?: string[];
     allowedWriteRoot?: string;
   } = {},
 ): SubAgentToolExecutor {
@@ -505,6 +403,12 @@ export class SubAgentSession {
     // 1. 构建独立的 system prompt
     const systemPrompt = await PromptManager.buildSystemPrompt({ roleName: this.options.roleName });
     this.messages.push({ role: 'system', content: systemPrompt });
+    try {
+      const memory = buildFileMemoryContext(this.options.parentSessionId || this.id, this.options.workingDirectory);
+      if (memory) this.messages.push(memory);
+    } catch (error: any) {
+      Logger.warning(`[子会话 ${this.id}] memory 读取失败: ${error.code || 'MEMORY_READ_FAILED'}`);
+    }
 
     // 2. 注入预选 skill；role-only dispatch 可让目标 role 子智能体自行选择。
     const skill = this.skillName ? this.skillManager.getSkill(this.skillName) : undefined;
@@ -542,13 +446,14 @@ export class SubAgentSession {
         parentSessionId: this.options.parentSessionId,
         abortSignal: this.abortController.signal,
         hiddenTools: this.options.hiddenTools,
+        allowedTools: this.options.allowedTools,
         allowedWriteRoot: this.options.allowedWriteRoot,
       },
     );
 
     // 创建独立的 ConversationRunner（不注入 channel，子智能体不直接和用户通信）
     const runner = new ConversationRunner(this.aiService, toolExecutor, {
-      maxTurns: skill?.metadata.maxTurns ?? 100,
+      maxTurns: this.options.maxTurns ?? skill?.metadata.maxTurns ?? 100,
       initialSkillName: this.skillName,
       initialSkillToolsets: skill?.metadata.toolsets,
       enableCompression: true,
@@ -617,6 +522,7 @@ export class SubAgentSession {
       this.pendingQuestion = null;
       this.pendingWaitPromise = null;
     }
+    this.options.onStateChange?.(this.getInfo());
   }
 
   /**
@@ -698,6 +604,7 @@ export class SubAgentSession {
 
   private reportProgress(message: string): void {
     this.progressLog.push(message);
+    this.options.onStateChange?.(this.getInfo());
     // 仅记录到 progressLog，不推飞书
     // 主 agent 通过 check_subagent 查看进度后自行决定是否告知用户
   }

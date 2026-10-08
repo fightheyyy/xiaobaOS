@@ -53,6 +53,7 @@
   },
   "homepage": "https://github.com/fightheyyy/xiaobaOS#readme",
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.79",
     "@anthropic-ai/sdk": "^0.27.0",
     "@larksuiteoapi/node-sdk": "^1.58.0",
     "@openai/codex-sdk": "0.146.0",
@@ -71,6 +72,7 @@
     "express": "^5.2.1",
     "glob": "^10.3.10",
     "gray-matter": "^4.0.3",
+    "https-proxy-agent": "7.0.6",
     "inquirer": "^8.2.7",
     "mysql2": "^3.22.1",
     "ora": "^5.4.1",
@@ -99,7 +101,7 @@
     "protobufjs": "7.5.5"
   },
   "engines": {
-    "node": ">=18.19.0"
+    "node": ">=22.12.0"
   },
   "build": {
     "appId": "com.catcompany.xiaoba",
@@ -155,7 +157,10 @@
           "!playwright/**",
           "!playwright-core/**",
           "!tsx/**",
-          "!typescript/**"
+          "!typescript/**",
+          "@anthropic-ai/sandbox-runtime/vendor/**/*",
+          "**/*.mjs",
+          "**/*.cjs"
         ]
       }
     ],

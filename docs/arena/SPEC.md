@@ -47,6 +47,8 @@ imported subject 仍通过 snapshot 和 clean runtime 隔离执行，但 clean r
 
 ```mermaid
 flowchart LR
+    Subject --> Execution["Shell / file tools / bounded workers"]
+    Execution --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
     Scenario["Scenario"] --> UserCat["UserCat"]
     UserCat <--> Subject["Subject Agent"]
     Subject --> Trace["original Trace"]
@@ -62,6 +64,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
+    Execution["Shell / bounded worker"] --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    Sandbox --> Native["Seatbelt on macOS / Bubblewrap on Linux"]
     Input["Scenario? + Subject"] --> Seed{"Scenario provided?"}
     Seed -->|yes| Run["UserCat ↔ Subject"]
     Seed -->|no| Propose["UserCat proposes Scenario"]
@@ -148,3 +152,8 @@ arena/runs/                          generated run evidence
 - Observability & Evidence 保存所有普通 Trace。
 - Evaluation 对 Inspector 生成的 Case 做唯一裁决。
 - Evolution 可以消费 Arena 发现的 Case，但 Arena 不决定 Candidate 激活。
+
+
+## Shared sandbox execution
+
+Clean-runtime launch uses `anthropic_sdk`, a secret-free `sandbox_policy_path` JSON and the shared SandboxExecutor. Legacy native engine CLI names map to this backend; unsandboxed fallback is removed. Evaluation workers receive selected model configuration and allowed provider destinations. See `../agent-runtime/SPEC.md` for the SDK contract.

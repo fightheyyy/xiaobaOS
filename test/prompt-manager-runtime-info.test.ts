@@ -57,6 +57,14 @@ describe('PromptManager runtime environment injection', () => {
     assert.ok(prompt.includes('只有 send_text 和 send_file 会产生用户可见输出'));
     assert.ok(prompt.includes('普通最终回复、thinking、tool result、subagent 状态注入和日志'));
   });
+
+  test('request clock resolves local midnight independently of a persistent session prompt', () => {
+    assert.ok(PromptManager.getCurrentTimeInfo(new Date('2026-10-08T15:59:59Z')).includes('当前日期：2026-10-08'));
+    const next = PromptManager.getCurrentTimeInfo(new Date('2026-10-08T16:00:00Z'));
+    assert.ok(next.includes('当前日期：2026-10-09'));
+    assert.ok(next.includes('2026-10-09 00:00:00'));
+    assert.ok(next.includes('2026-10-08T16:00:00.000Z'));
+  });
 });
 
 after(() => {

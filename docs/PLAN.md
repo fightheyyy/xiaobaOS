@@ -1,7 +1,7 @@
 # XiaoBa-CLI PLAN
 
 状态：Active
-最后更新：2026-08-06
+最后更新：2026-10-08
 Owner：XiaoBa maintainers
 
 本文只维护仓库级当前状态和收敛顺序。模块细节进入六份模块 PLAN。
@@ -35,7 +35,11 @@ XiaoBa-CLI 已形成共享 Agent Runtime、一个 Base Main Agent 和八个默�
 
 ```mermaid
 flowchart LR
-    Surface["Surface"] --> Runtime["Agent Runtime"]
+    Surface["Surface"] -->|Feishu / Weixin / Pet| Event["Event admission"]
+    Event --> Runtime["Agent Runtime"]
+    Surface -->|CLI / control paths| Runtime
+    Runtime --> Tools["SecretaryCat tools"]
+    Tools --> Connector["Feishu Connector"]
     Roles["Roles & Skills"] --> Runtime
     Runtime --> Evidence["Observability & Evidence"]
     Runtime --> Conversation["Visible Conversation Journal"]
@@ -66,18 +70,29 @@ flowchart LR
 | M10 Legacy state removal | Completed | 旧 runner/DAG/promotion/regression 与 Dashboard/loader capability lifecycle 均已删除 |
 | M11 Browser/GUI/Secretary readiness | Partial | typed adapters 可用，外部依赖与授权仍不完整 |
 | M12 EngineerCat Codex adapter | Completed | 官方 SDK 收敛为一个 role-scoped Tool，保留原生 coding fallback，不恢复 job manager/supervisor |
+| M13 Shared sandbox execution | Completed | XiaoBa-owned process/file isolation uses Anthropic SDK; Linux verified, macOS packaging pending, Windows blocked |
+
+## Integration migration
+
+The first Surface / Connector / Event separation is implemented inside
+the existing module set. Surface PLAN owns its acceptance and rollout. Existing
+Base/Role execution, tool confirmation and evidence boundaries remain canonical.
+Event is independently exported with a Surface adapter and injectable storage;
+nightly memory maintenance is now a persistent timer/runtime producer; other connector completion producers remain future work.
+File memory now feeds bounded indexes into requests and supports role-owned
+correction/forget/archive and incremental nightly maintenance; sessionKey remains the identity/memory boundary; cross-surface person merging is out of scope.
 
 ## Next Steps
 
 1. 用真实失败和回归逐步扩充 `xiaoba-core-readonly-v1`；只按实际 Case 需要增加 hard Verifier。
-2. 在有真实平台需求时补非 macOS 的 enforced `workspace_write` adapter；无沙箱的平台继续 fail closed。
+2. 验收 macOS 发行构建中的统一 SDK 沙箱；Linux 写隔离已接入，无沙箱的平台继续 fail closed。
 3. 内部 `Eval*` 兼容名只随相关维护逐步收敛。
 4. 在 Windows / Linux Electron 发行构建中验证 SDK 的 optional native binary；macOS arm64 已完成打包态验证。
 5. 不增加新的 schema、report、role 或 workflow subsystem。
 
 ## Owners
 
-- Surface：`src/commands/**`, `src/feishu/**`, `src/weixin/**`, `src/pet/**`, `src/dashboard/**`, `desktop/**`
+- Surface：`src/commands/**`, `src/feishu/**`, `src/weixin/**`, `src/pet/**`, `src/dashboard/**`, `src/events/**`, `src/connectors/**`, `desktop/**`
 - Agent Runtime：`src/core/**`, `src/providers/**`, `src/tools/**`, `src/types/**`
 - Roles & Skills：`roles/**`, `src/roles/**`, `skills/**`, `src/skills/**`
 - Observability & Evidence：`src/observability/**`, `logs/**`, `data/**`, `memory/**`, `output/**`
@@ -99,13 +114,20 @@ flowchart LR
 
 ## Risks / Open Questions
 
-- `workspace_write` Replay 依赖 enforced clean runtime；当前原生写沙箱只支持 macOS，其他平台 fail closed。
+- `workspace_write` Replay 依赖 enforced clean runtime；统一 SDK 后端支持 macOS/Linux；缺少依赖或 user namespace 时 fail closed。
 - source + dist 激活需要保持简单、事务性、可回滚，不能演化成新 lifecycle subsystem。
 - 当前维护 CaseSet 只有三条只读 Case，证明核心链可维护，不代表广泛 Agent 能力。
 - Dashboard/Pet/Bridge 的 Owner identity 与高风险确认尚不一致。
 - Browser/GUI/Secretary 外部 driver 和凭据可用性仍受环境约束。
 
 ## Recent Verification
+
+- 2026-10-08: `npm run build` passed; Event-focused integration passed 59/59 and
+  file-memory-focused integration passed 33/33; repository regression passed 591/592.
+  The sole failure is the unchanged Evolution process-group timeout test: this
+  cloud container retains killed descendants as zombies, so PID existence is
+  reported after termination. The same failure existed before this change.
+  Scripted base runtime passed 11/11; contract smoke passed 23/23 on 2026-10-07.
 
 - XiaoBaOS Conversation slice passes `npm test` 575/575 across 104 suites and
   `npm run build`; focused coverage passes 52/52. A real local Journal → Catena
@@ -124,3 +146,42 @@ flowchart LR
 - 真实 Source Candidate 验收完成完整 build、普通仓库测试与独立 native-sandbox contract phase，结果为 pass；未激活生产源码。
 - Lightweight Evaluation、Arena、Evolution、Inspector、Reviewer、UserCat 和 Case Replay coverage 全部通过。
 - 七份 maintained SPEC 均恰好包含 Current / Target 两张 Mermaid；`git diff --check` passed。
+
+## Proactive memory maintenance
+
+Completed: Base proactive EvolutionCat dispatch guidance and Event-driven filesystem memory maintenance, now using the shared Linux/macOS Scheduler. Detailed acceptance and remaining risks live in the relevant module plans.
+
+Verification: build passed; proactive memory/journal/role/security 39/39; full regression 605/606 with the existing cloud Evolution descendant-process assertion as the sole failure.
+
+## Shared scheduled events
+
+Owner: Surface / Runtime. Completed: one workspace Scheduler/cron, two Event consumers, compatibility entries and legacy cron migration. Consumers retain their original execution boundaries. Focused verification: 45/46; only the existing cloud descendant-process SIGKILL assertion fails. Full regression: 615/616 passed; the sole failure is the existing cloud descendant-process SIGKILL assertion.
+
+## Session timed wakeups
+
+Owner: Surface / Runtime / Evidence. Completed: session-owned one-shot user reminders and Agent-created checks through the shared Event architecture. See module plans for contracts and operational limits. Verification: build and focused reminder/scheduler/CLI/clock/session checks 47/47 passed; full regression 630/631 passed; the sole failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion.
+
+## Agent-owned app connections
+
+Owner: Surface / Runtime. Completed: Agent-owned native Gmail, Notion and GitHub Connectors, shared credential/transport boundary, Base tools, default full main-session access and local management CLI. Feishu stays compatible. Module contracts and operational limits are in the Surface/Runtime/Evidence specs; user setup is in roles/README.md. Dashboard connection/token management and Google OAuth are implemented via the shared service; app subscriptions and authenticated remote administration remain next.
+
+Verification: TypeScript build and focused native connector / Feishu boundary / role-tool tests 39/39 passed, including real AgentSession confirmed-write execution with mocked official HTTP. Full regression 650/651 passed; the only failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion. Live app accounts are not yet verified.
+
+
+## Dashboard connection management
+
+Owner: Surface / Evidence. Completed: Agent-scoped connection page, write-only private credentials, local management boundaries, Gmail OAuth, account verification, enable/disable/disconnect and default full main-session operation access. See module plans for contracts. Verification: build and focused 34/34 passed; actual Chromium desktop/mobile flows passed with mocked provider HTTP and Google callback; full regression 658/659 passed with only the existing cloud Evolution process-group assertion. Real provider authorization still requires user-owned tokens/OAuth client configuration.
+
+
+Dashboard simplification: completed. Three authorization-only cards reuse existing Skills/Store components and the shared modal/config fields; no requester/scope/Feishu/control panel remains. Token connection and Google callback verify accounts automatically. All configured/enabled app operations are available by default to valid main sessions; retired grants are ignored/removed on the next write. Google OAuth covers all implemented mail operations through gmail.modify. Write confirmation and existing role/child boundaries remain intact.
+
+Verification: build and focused 50/50 passed, including cross-surface default reads/writes, old-config migration, retired API absence and exact write-confirmation tests. Real Chromium validated shared computed card styles, token/OAuth connection, all-operation defaults, disconnect, mobile modal and Electron renderer external authorization with mocked providers and no page errors. Full regression 658/659 passed; the sole failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion. Real provider credentials/consent and native OS browser launch remain user-host checks.
+
+
+## Unified sandbox execution
+
+Owner: Runtime. Completed: XiaoBa-owned Shell/file/SubAgent/Arena/Evolution sandbox paths use one pinned Anthropic SDK adapter. See `agent-runtime/PLAN.md` for acceptance and operational limits. Build and 10/10 real SDK contracts passed; full regression 669/670 passed, with only the unchanged cloud Evolution descendant PID assertion failing.
+
+## Personal Agent continuity
+
+Runtime/Surface: request cancellation, durable native Connector write receipts, interrupted-child inspection and opt-in Gmail history → Event → existing session check are implemented. Final focused integration 98/98 passed (serial final integration); full regression 692/693 passed before the final per-request identity refinement, with only the existing cloud Evolution descendant PID/zombie assertion failing. Full automatic cursor recovery, GitHub/Notion change producers and remote administrator authentication remain separate work. Live account consent, original-channel delivery, macOS packaged SDK execution and proactive interaction quality require user-host acceptance; they are not inferred from mocked provider tests.

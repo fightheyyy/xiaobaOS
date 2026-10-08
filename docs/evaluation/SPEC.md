@@ -45,6 +45,8 @@ Replay 默认使用 `read_only` policy，只向被测 Agent 暴露 `read_file`�
 
 ```mermaid
 flowchart LR
+    Replay --> Execution["Shell / file tools / bounded workers"]
+    Execution --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
     Fixture["Scripted fixture"] --> Test["Scripted Runtime Test"]
     Test --> TestResult["test-result.json"]
 
@@ -63,6 +65,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
+    Execution["Shell / bounded worker"] --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    Sandbox --> Native["Seatbelt on macOS / Bubblewrap on Linux"]
     CaseSet["CaseSet"] --> Eval["Shared Evaluation"]
     Eval --> Replay["Replay real Agent"]
     Replay --> Trace["Trace"]
@@ -168,3 +172,8 @@ output/eval/                       generated Eval evidence
 - Observability & Evidence 保存 fresh Trace 和 artifact refs。
 - Roles & Skills 提供 ReviewerCat、被测 Role/Skill 和 Evolution 调用方。
 - Arena 生成 Case 并调用本模块，不复制裁决链。
+
+
+## Shared sandbox execution
+
+Replay retains its read-only default and explicit workspace_write gate. Source Candidate build, ordinary tests and the native-contract phase now all execute through the shared SDK adapter on supported hosts; candidate tests no longer run directly on the host. See `../agent-runtime/SPEC.md` for the execution contract.

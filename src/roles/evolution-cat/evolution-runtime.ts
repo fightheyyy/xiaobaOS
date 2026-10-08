@@ -1,9 +1,10 @@
+import { arenaRuntimeEnvironment } from '../../arena/arena-shell';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { sandboxExecutor } from '../../sandbox/executor';
+import { shellQuote } from '../../sandbox/policy';
 import { ArenaManager } from '../../arena/arena-manager';
-import { buildArenaShellCommand } from '../../arena/arena-shell';
 import { FindingCase } from '../../arena/arena-workflow';
 import { EvaluationResult } from '../../eval/evaluation';
 import { createInspectorCat } from '../inspector-cat/finding-case';
@@ -280,7 +281,7 @@ export async function evaluateEvolutionCandidate(input: {
       network: 'enabled',
     },
   });
-  if (!runtime.launch.sandbox_profile_path || !runtime.launch.sandbox_shell_command) {
+  if (!runtime.launch.sandbox_policy_path || !runtime.launch.sandbox_shell_command) {
     throw new Error('Candidate Evaluation requires an enforced clean-runtime sandbox');
   }
   const caseSet = {
@@ -319,18 +320,10 @@ export async function evaluateEvolutionCandidate(input: {
     '--runs',
     String(input.runs_per_case),
   ];
-  const shellCommand = buildArenaShellCommand({
-    cwd: runtime.roots.workspace_root,
-    command,
-    env: runtime.launch.env,
-    passThroughEnv: runtime.launch.pass_through_env,
-    sandboxProfilePath: runtime.launch.sandbox_profile_path,
-  });
-  const execution = spawnSync('/bin/sh', ['-lc', shellCommand], {
-    cwd: runtime.roots.workspace_root,
-    env: process.env,
-    encoding: 'utf-8',
-    timeout: runtime.sandbox.timeout_ms,
+  const environment = arenaRuntimeEnvironment(runtime);
+  const execution = await sandboxExecutor.execute({
+    policy: JSON.parse(fs.readFileSync(runtime.launch.sandbox_policy_path, 'utf8')),
+    command: command.map(shellQuote).join(' '), environment, timeoutMs: runtime.sandbox.timeout_ms,
   });
   fs.writeFileSync(
     path.join(runtime.roots.run_root, 'evaluation.stdout.log'),
@@ -394,7 +387,7 @@ async function evaluateSourceCandidate(input: {
       network: 'enabled',
     },
   });
-  if (!runtime.launch.sandbox_profile_path || !runtime.launch.sandbox_shell_command) {
+  if (!runtime.launch.sandbox_policy_path || !runtime.launch.sandbox_shell_command) {
     throw new Error('Source Candidate Evaluation requires an enforced clean-runtime sandbox');
   }
 
@@ -426,18 +419,10 @@ async function evaluateSourceCandidate(input: {
     '--runs',
     String(input.runs_per_case),
   ];
-  const shellCommand = buildArenaShellCommand({
-    cwd: runtime.roots.workspace_root,
-    command,
-    env: runtime.launch.env,
-    passThroughEnv: runtime.launch.pass_through_env,
-    sandboxProfilePath: runtime.launch.sandbox_profile_path,
-  });
-  const execution = spawnSync('/bin/sh', ['-lc', shellCommand], {
-    cwd: runtime.roots.workspace_root,
-    env: process.env,
-    encoding: 'utf-8',
-    timeout: runtime.sandbox.timeout_ms,
+  const environment = arenaRuntimeEnvironment(runtime);
+  const execution = await sandboxExecutor.execute({
+    policy: JSON.parse(fs.readFileSync(runtime.launch.sandbox_policy_path, 'utf8')),
+    command: command.map(shellQuote).join(' '), environment, timeoutMs: runtime.sandbox.timeout_ms,
   });
   fs.writeFileSync(
     path.join(runtime.roots.run_root, 'evaluation.stdout.log'),

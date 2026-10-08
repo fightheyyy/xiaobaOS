@@ -94,6 +94,7 @@ describe('WeixinBot final response delivery', () => {
     (bot as any).sessionManager = new FakeWeixinSessionManager(session);
 
     await (bot as any).handleMessage(textMessage('hello'));
+    await (bot as any).handleMessage(textMessage('hello'));
     await bot.destroy();
 
     assert.deepStrictEqual(session.messages, [{ text: 'hello', surface: 'weixin' }]);

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createDashboardConnectorRouter, DashboardConnectorOptions } from './connectors';
 import { SkillManager } from '../../skills/skill-manager';
 import { ConfigManager } from '../../utils/config';
 import { ServiceManager } from '../service-manager';
@@ -23,7 +24,7 @@ import { getDashboardObservabilityReviewState } from '../observability-actions';
 // import { ReportGenerator } from '../../utils/report-generator';
 // import { LogUploader } from '../../utils/log-uploader';
 
-const DASHBOARD_PAGES = new Set(['services', 'pet', 'config', 'skills', 'roles', 'store']);
+const DASHBOARD_PAGES = new Set(['services', 'pet', 'config', 'skills', 'roles', 'store', 'connectors']);
 const DASHBOARD_HIDDEN_SKILLS = new Set(['sub-agent', 'background-task-runner']);
 let dashboardNavigationRequest: { id: number; page: string; createdAt: number } | null = null;
 let dashboardNavigationRequestId = 0;
@@ -130,6 +131,7 @@ export interface DashboardApiOptions {
   onNavigate?: (page: string) => void;
   observabilityRootDir?: string;
   observabilityOutputRoot?: string;
+  connectors?: DashboardConnectorOptions;
 }
 
 /**
@@ -154,6 +156,7 @@ function installSkillNpmDeps(skillDir: string): void {
 
 export function createApiRouter(serviceManager: ServiceManager, options: DashboardApiOptions = {}): Router {
   const router = Router();
+  router.use('/connectors', createDashboardConnectorRouter(serviceManager.getProjectRoot(), options.connectors));
   router.use(createPetRouter());
 
   // ==================== 总览 ====================

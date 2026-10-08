@@ -43,7 +43,7 @@ function dependencies(overrides: DoctorRunnerDependencies = {}): DoctorRunnerDep
   return {
     now: () => new Date('2026-07-17T00:00:00.000Z'),
     appVersion: '0.2.0',
-    nodeVersion: 'v20.18.1',
+    nodeVersion: 'v24.19.0',
     platform: 'darwin',
     arch: 'arm64',
     environment: {},
@@ -227,6 +227,13 @@ describe('runDoctor', () => {
     assert.strictEqual(check(report, 'provider.static_config').status, 'fail');
     assert.match(check(report, 'provider.static_config').summary, /could not be read/);
     assert.strictEqual(report.ready, false);
+  });
+
+  test('checks the Sandbox SDK minimum Node minor version', async () => {
+    for (const [version, expected] of [['v22.11.0', 'fail'], ['v22.12.0', 'pass'], ['v24.0.0', 'pass']]) {
+      const report = await runDoctor({}, dependencies({ nodeVersion: version, nodeEngine: '>=22.12.0' }));
+      assert.strictEqual(check(report, 'runtime.node').status, expected);
+    }
   });
 
   test('reports runtime and root failures without leaking secret probe values', async () => {

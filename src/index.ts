@@ -8,6 +8,10 @@ import { registerSkillCommand } from './commands/skill';
 import { registerRoleCommand } from './commands/role';
 import { registerArenaCommand } from './commands/arena';
 import { registerEvalCommand } from './commands/eval';
+import { registerScheduleCommand } from './commands/schedule';
+import { registerSandboxCommand } from './commands/sandbox';
+import { registerConnectorCommand } from './commands/connector';
+import { registerMemoryCommand } from './commands/memory';
 import { registerEvolutionCommand } from './commands/evolution';
 import { registerDoctorCommand } from './commands/doctor';
 import { feishuCommand } from './commands/feishu';
@@ -45,7 +49,8 @@ async function main() {
     const isStrictDoctorJson = isDoctor && actionCommand.opts().json === true;
     const isStrictArenaContractJson = actionCommand.name() === 'live-contract'
       && actionCommand.opts().json === true;
-    if (!isStrictDoctorJson && !isStrictArenaContractJson) {
+    const isSandboxCheck = actionCommand.name() === 'check' && actionCommand.parent?.name() === 'sandbox';
+    if (!isStrictDoctorJson && !isStrictArenaContractJson && !isSandboxCheck) {
       Logger.brand();
     }
     if (isDoctor) return;
@@ -142,6 +147,10 @@ async function main() {
 
   // EvolutionCat 夜间演化入口
   registerEvolutionCommand(program);
+  registerMemoryCommand(program);
+  registerConnectorCommand(program);
+  registerScheduleCommand(program);
+  registerSandboxCommand(program);
 
   // 本机环境与能力诊断
   registerDoctorCommand(program);

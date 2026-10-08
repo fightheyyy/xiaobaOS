@@ -1,9 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Message } from '../types';
 
-const MEMORY_ROOT = path.resolve(process.cwd(), 'memory');
 const MAX_MEMORY_TEXT = 500;
 const MAX_RECORDS_PER_KIND = 50;
 
@@ -18,7 +17,9 @@ export type LongTermMemoryKind = 'preference' | 'habit' | 'instruction' | 'fact'
 export type LongTermMemoryConfidence = 'high' | 'medium';
 
 export interface MemorySourceRef {
-  kind: 'compact_message' | 'transcript' | 'markdown' | 'tool';
+  kind: 'compact_message' | 'transcript' | 'markdown' | 'tool' | 'conversation';
+  messageIds?: string[];
+  reason?: string;
   prefix?: string;
   messageIndex?: number;
   role?: Message['role'];
@@ -57,12 +58,26 @@ export interface MemoryFinalizationResult {
 }
 
 export interface FinalizeSessionOptions {
+  rootDir?: string;
   reason?: MemoryFinalizationReason;
   sessionType?: string;
   now?: Date;
 }
 
+export interface MemoryMaintenanceAction {
+  action: 'remember' | 'replace' | 'archive' | 'forget';
+  recordId?: string;
+  text?: string;
+  kind?: LongTermMemoryKind;
+  confidence?: LongTermMemoryConfidence;
+  evidence: string[];
+  reason: string;
+}
+
 export interface RememberMemoryOptions {
+  confidence?: LongTermMemoryConfidence;
+  evidence?: string;
+  replaces?: string;
   kind?: LongTermMemoryKind;
   now?: Date;
   rootDir?: string;
@@ -107,7 +122,7 @@ export class MemoryFinalizer {
   }
 
   static getSessionDir(sessionKey: string, rootDir?: string): string {
-    const memoryRoot = rootDir ? path.resolve(rootDir, 'memory') : MEMORY_ROOT;
+    const memoryRoot = path.resolve(rootDir || process.cwd(), 'memory');
     return path.join(memoryRoot, 'sessions', this.hashSessionKey(sessionKey));
   }
 
@@ -146,35 +161,39 @@ export class MemoryFinalizer {
     const now = options.now ?? new Date();
     const timestamp = now.toISOString();
     const sessionKeyHash = this.hashSessionKey(sessionKey);
-    const memoryPath = this.getMemoryPath(sessionKey);
-    const existing = fs.existsSync(memoryPath) ? readMemoryRecords(memoryPath) : [];
+    const memoryPath = this.getMemoryPath(sessionKey, options.rootDir);
     const candidates = extractLongTermRecords(messages, timestamp);
-    const { records, added } = mergeRecords(existing, candidates);
+    if (candidates.length === 0) return null;
+    return withMemoryLock(memoryPath, () => {
+      const existing = fs.existsSync(memoryPath) ? readMemoryRecords(memoryPath) : [];
+      const excluded = readExcludedIds(memoryPath);
+      const { records, added } = mergeRecords(existing, candidates.filter(record => !excluded.has(record.id)));
 
-    if (added.length === 0) {
-      return null;
-    }
+      if (added.length === 0) {
+        return null;
+      }
 
-    writeMemoryMarkdown(memoryPath, {
-      version: 1,
-      scope: 'session-person',
-      sessionKeyHash,
-      loadPolicy: 'on_demand',
-      updatedAt: timestamp,
-      records,
+      writeMemoryMarkdown(memoryPath, {
+        version: 1,
+        scope: 'session-person',
+        sessionKeyHash,
+        loadPolicy: 'on_demand',
+        updatedAt: timestamp,
+        records,
+      }, excluded);
+
+      return {
+        version: 1,
+        sessionKeyHash,
+        sessionType: options.sessionType,
+        source: options.reason ?? 'ttl_cleanup',
+        updatedAt: timestamp,
+        memoryPath,
+        added,
+        records,
+        totalRecords: records.length,
+      };
     });
-
-    return {
-      version: 1,
-      sessionKeyHash,
-      sessionType: options.sessionType,
-      source: options.reason ?? 'ttl_cleanup',
-      updatedAt: timestamp,
-      memoryPath,
-      added,
-      records,
-      totalRecords: records.length,
-    };
   }
 
   static remember(
@@ -195,51 +214,130 @@ export class MemoryFinalizer {
     const now = options.now ?? new Date();
     const timestamp = now.toISOString();
     const memoryPath = this.getMemoryPath(normalizedSessionKey, options.rootDir);
-    const existing = fs.existsSync(memoryPath) ? readMemoryRecords(memoryPath) : [];
-    const text = normalizeMemoryText(normalizedValue);
-    const kind = options.kind ?? classifyMemoryKind(text);
-    const candidate = makeRecord(
-      kind,
-      text,
-      { kind: 'tool', toolName: 'remember' },
-      timestamp,
-      'high',
-    );
-    const previous = existing.find(record => record.id === candidate.id);
-    const record: LongTermMemoryRecord = previous
-      ? {
-          ...previous,
-          source: candidate.source,
-          confidence: 'high',
-          updatedAt: timestamp,
-        }
-      : candidate;
-    const otherKinds = existing.filter(item => item.kind !== record.kind);
-    const sameKind = existing
-      .filter(item => item.kind === record.kind && item.id !== record.id)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, MAX_RECORDS_PER_KIND - 1);
-    const records = sortRecords([...otherKinds, ...sameKind, record]);
+    return withMemoryLock(memoryPath, () => {
+      const existing = fs.existsSync(memoryPath) ? readMemoryRecords(memoryPath) : [];
+      const text = normalizeMemoryText(normalizedValue);
+      const kind = options.kind ?? classifyMemoryKind(text);
+      const candidate = makeRecord(
+        kind,
+        text,
+        { kind: 'tool', toolName: 'remember', ...(options.evidence ? { reason: options.evidence } : {}) },
+        timestamp,
+        options.confidence || 'high',
+      );
+      const replaced = options.replaces ? existing.find(record => record.id === options.replaces) : undefined;
+      if (options.replaces && !replaced) throw new Error('MEMORY_RECORD_NOT_FOUND');
+      const previous = existing.find(record => record.id === candidate.id) || replaced;
+      const record: LongTermMemoryRecord = previous
+        ? { ...candidate, firstSeenAt: previous.firstSeenAt }
+        : candidate;
+      const excluded = readExcludedIds(memoryPath);
+      if (replaced && replaced.id !== record.id) excluded.add(replaced.id);
+      excluded.delete(record.id);
+      const retained = existing.filter(item => item.id !== replaced?.id);
+      const otherKinds = retained.filter(item => item.kind !== record.kind);
+      const sameKind = retained
+        .filter(item => item.kind === record.kind && item.id !== record.id)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, MAX_RECORDS_PER_KIND - 1);
+      const records = sortRecords([...otherKinds, ...sameKind, record]);
 
-    writeMemoryMarkdown(memoryPath, {
-      version: 1,
-      scope: 'session-person',
-      sessionKeyHash: this.hashSessionKey(normalizedSessionKey),
-      loadPolicy: 'on_demand',
-      updatedAt: timestamp,
-      records,
+      writeMemoryMarkdown(memoryPath, {
+        version: 1,
+        scope: 'session-person',
+        sessionKeyHash: this.hashSessionKey(normalizedSessionKey),
+        loadPolicy: 'on_demand',
+        updatedAt: timestamp,
+        records,
+      }, excluded);
+
+      return {
+        version: 1,
+        sessionKeyHash: this.hashSessionKey(normalizedSessionKey),
+        updatedAt: timestamp,
+        memoryPath,
+        action: previous ? 'updated' : 'created',
+        record,
+        totalRecords: records.length,
+      };
     });
-
-    return {
-      version: 1,
-      sessionKeyHash: this.hashSessionKey(normalizedSessionKey),
-      updatedAt: timestamp,
-      memoryPath,
-      action: previous ? 'updated' : 'created',
-      record,
-      totalRecords: records.length,
-    };
   }
+
+  /** One validated batch writes the active index once; archive-first preserves data on interruption. */
+  static applyMaintenance(sessionKey: string, actions: MemoryMaintenanceAction[], expectedDigest: string,
+    rootDir: string, now = new Date()): void {
+    const memoryPath = this.getMemoryPath(sessionKey, rootDir);
+    withMemoryLock(memoryPath, () => {
+      const raw = fs.existsSync(memoryPath) ? fs.readFileSync(memoryPath, 'utf8') : '';
+      if (createHash('sha256').update(raw).digest('hex') !== expectedDigest) throw new Error('MEMORY_CHANGED');
+      let records = fs.existsSync(memoryPath) ? readMemoryRecords(memoryPath) : [];
+      const excluded = readExcludedIds(memoryPath);
+      const archived: Array<{ record: LongTermMemoryRecord; reason: string }> = [];
+      for (const action of actions) {
+        const old = action.recordId ? records.find(record => record.id === action.recordId) : undefined;
+        if (action.action !== 'remember' && !old) throw new Error('MEMORY_RECORD_NOT_FOUND');
+        if (old) {
+          records = records.filter(record => record.id !== old.id);
+          excluded.add(old.id);
+          if (action.action === 'archive') archived.push({ record: old, reason: action.reason });
+        }
+        if (action.action === 'remember' || action.action === 'replace') {
+          const record = makeRecord(action.kind!, normalizeMemoryText(action.text!),
+            { kind: 'conversation', messageIds: action.evidence, reason: action.reason },
+            now.toISOString(), action.confidence || 'medium');
+          record.firstSeenAt = old?.firstSeenAt || records.find(item => item.id === record.id)?.firstSeenAt || record.firstSeenAt;
+          records = records.filter(item => item.id !== record.id);
+          if (Object.keys(SECTION_BY_KIND).some(kind => excluded.has(stableId(kind, record.text)) && stableId(kind, record.text) !== old?.id)) throw new Error('MEMORY_EXCLUDED_RECORD');
+          if (old?.id === record.id) excluded.delete(record.id);
+          records.push(record);
+        }
+      }
+      // Never silently evict stable facts to fit a cap. EvolutionCat must explicitly consolidate.
+      if (Object.keys(SECTION_BY_KIND).some(kind => records.filter(record => record.kind === kind).length > MAX_RECORDS_PER_KIND)) {
+        throw new Error('MEMORY_CAPACITY_REQUIRES_CONSOLIDATION');
+      }
+      if (archived.length) {
+        const archivePath = path.join(path.dirname(memoryPath), 'ARCHIVE.md');
+        let archive = fs.existsSync(archivePath) ? fs.readFileSync(archivePath, 'utf8') : '# Archived memory\n\nRead on demand; these records are inactive.\n';
+        for (const { record, reason } of archived) {
+          if (!archive.includes(`<!-- archived:${record.id}:${record.updatedAt} -->`)) archive += `\n<!-- archived:${record.id}:${record.updatedAt} -->\n${record.text}\n\nSource: ${record.source.kind}; first seen: ${record.firstSeenAt}; archived: ${now.toISOString()}\nReason: ${reason.replace(/<!--/g, '&lt;!--').replace(/-->/g, '--&gt;')}\n\n<!-- metadata:${JSON.stringify(record).replace(/-->/g, '--&gt;').replace(/<!--/g, '&lt;!--')} -->\n`;
+        }
+        const temporary = `${archivePath}.${randomUUID()}.tmp`;
+        fs.writeFileSync(temporary, archive, { mode: 0o600 });
+        fs.renameSync(temporary, archivePath);
+      }
+      if (actions.length) writeMemoryMarkdown(memoryPath, {
+        version: 1, scope: 'session-person', sessionKeyHash: this.hashSessionKey(sessionKey),
+        loadPolicy: 'on_demand', updatedAt: now.toISOString(), records: sortRecords(records),
+      }, excluded);
+    });
+  }
+
+  static archive(sessionKey: string, recordId: string, reason: string, rootDir: string): { memoryPath: string; totalRecords: number } {
+    const memoryPath = this.getMemoryPath(sessionKey, rootDir);
+    const raw = fs.existsSync(memoryPath) ? fs.readFileSync(memoryPath, 'utf8') : '';
+    this.applyMaintenance(sessionKey, [{ action: 'archive', recordId, reason, evidence: [] }],
+      createHash('sha256').update(raw).digest('hex'), rootDir);
+    return { memoryPath, totalRecords: this.loadSessionMemory(sessionKey, rootDir)?.records.length || 0 };
+  }
+
+  static forget(sessionKey: string, recordId: string, rootDir?: string): { memoryPath: string; totalRecords: number } {
+    if (!sessionKey.trim() || !recordId.trim()) throw new Error('MEMORY_RECORD_REQUIRED');
+    const memoryPath = this.getMemoryPath(sessionKey, rootDir);
+    return withMemoryLock(memoryPath, () => {
+      const existing = fs.existsSync(memoryPath) ? readMemoryRecords(memoryPath) : [];
+      if (!existing.some(record => record.id === recordId)) throw new Error('MEMORY_RECORD_NOT_FOUND');
+      const records = existing.filter(record => record.id !== recordId);
+      const excluded = readExcludedIds(memoryPath);
+      excluded.add(recordId);
+      writeMemoryMarkdown(memoryPath, {
+        version: 1, scope: 'session-person', sessionKeyHash: this.hashSessionKey(sessionKey),
+        loadPolicy: 'on_demand', updatedAt: new Date().toISOString(), records,
+      }, excluded);
+      return { memoryPath, totalRecords: records.length };
+    });
+  }
+
 }
 
 function extractLongTermRecords(messages: Message[], timestamp: string): LongTermMemoryRecord[] {
@@ -263,7 +361,7 @@ function collectIndexedTexts(messages: Message[]): IndexedText[] {
   const items: IndexedText[] = [];
 
   messages.forEach((message, index) => {
-    if (message.__injected) return;
+    if (message.__injected || typeof message.content === 'string' && message.content.startsWith('[scheduled_wakeup]')) return;
     if (message.role === 'user') {
       const text = contentToString(message.content).trim();
       if (text) {
@@ -319,7 +417,7 @@ function normalizeMemoryText(line: string): string {
     text = `用户记忆：${text}`;
   }
 
-  return ensureSentence(limitText(text, MAX_MEMORY_TEXT));
+  return ensureSentence(limitText(text.replace(/<!--/g, '&lt;!--').replace(/-->/g, '--&gt;'), MAX_MEMORY_TEXT));
 }
 
 function classifyMemoryKind(text: string): LongTermMemoryKind {
@@ -390,7 +488,7 @@ function sortRecords(records: LongTermMemoryRecord[]): LongTermMemoryRecord[] {
   });
 }
 
-function writeMemoryMarkdown(memoryPath: string, doc: SessionLongTermMemory): void {
+function writeMemoryMarkdown(memoryPath: string, doc: SessionLongTermMemory, excluded = new Set<string>()): void {
   fs.mkdirSync(path.dirname(memoryPath), { recursive: true });
   const lines: string[] = [
     '---',
@@ -403,9 +501,12 @@ function writeMemoryMarkdown(memoryPath: string, doc: SessionLongTermMemory): vo
     '',
     '# Long-Term Memory',
     '',
-    'These notes are not loaded by default. Recall only the small, relevant subset when the user asks or the task clearly needs stable preferences.',
+    'Runtime reads a bounded index each request. Read linked files only when relevant.',
   ];
 
+  const header = lines.join('\n');
+  lines.length = 0;
+  lines.push('<!-- xiaoba:records:start -->');
   for (const kind of ['preference', 'habit', 'instruction', 'fact'] as LongTermMemoryKind[]) {
     lines.push('', `## ${SECTION_BY_KIND[kind]}`, '');
     const records = doc.records.filter(record => record.kind === kind);
@@ -415,11 +516,41 @@ function writeMemoryMarkdown(memoryPath: string, doc: SessionLongTermMemory): vo
     }
 
     for (const record of records) {
-      lines.push(`- ${record.text} <!-- id: ${record.id}; source: ${sourceLabel(record.source)}; confidence: ${record.confidence}; updated: ${record.updatedAt} -->`);
+      lines.push(`- ${record.text} <!-- id: ${record.id}; source: ${sourceLabel(record.source)}; sourceRef: ${encodeURIComponent(JSON.stringify(record.source))}; confidence: ${record.confidence}; firstSeenAt: ${record.firstSeenAt}; updated: ${record.updatedAt} -->`);
     }
   }
 
-  fs.writeFileSync(memoryPath, `${lines.join('\n')}\n`, 'utf-8');
+  if (excluded.size) lines.push('', `<!-- xiaoba:excluded: ${[...excluded].join(' ')} -->`);
+  lines.push('<!-- xiaoba:records:end -->');
+  const block = lines.join('\n');
+  let raw = fs.existsSync(memoryPath) ? fs.readFileSync(memoryPath, 'utf8') : header;
+  const starts = raw.match(/<!-- xiaoba:records:start -->/g) || [];
+  const ends = raw.match(/<!-- xiaoba:records:end -->/g) || [];
+  if (starts.length !== ends.length || starts.length > 1
+    || (starts.length && raw.indexOf('<!-- xiaoba:records:end -->') < raw.indexOf('<!-- xiaoba:records:start -->'))) {
+    throw new Error('MEMORY_BLOCK_INVALID');
+  }
+  if (raw.includes('<!-- xiaoba:records:start -->')) {
+    raw = raw.replace(/<!-- xiaoba:records:start -->[\s\S]*?<!-- xiaoba:records:end -->/, block);
+  } else {
+    // Upgrade legacy generated sections; keep free prose, custom headings and links.
+    let managedSection = false;
+    raw = raw.split(/\r?\n/).filter(line => {
+      const heading = line.match(/^##\s+(.+?)\s*$/);
+      if (heading) {
+        managedSection = Boolean(KIND_BY_SECTION[heading[1]]);
+        return !managedSection;
+      }
+      if (managedSection && line.trim().startsWith('- ')) return false;
+      return !line.startsWith('These notes are not loaded by default.');
+    }).join('\n').trimEnd() + '\n\n' + block;
+  }
+  raw = raw.replace(/^updatedAt:.*$/m, `updatedAt: ${doc.updatedAt}`);
+  const temp = `${memoryPath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temp, `${raw.trimEnd()}\n`, { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temp, memoryPath);
+  } finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
 }
 
 function readMemoryRecords(memoryPath: string): LongTermMemoryRecord[] {
@@ -451,7 +582,7 @@ function readMemoryRecords(memoryPath: string): LongTermMemoryRecord[] {
       id: meta.id || stableId(currentKind, text),
       kind: currentKind,
       text,
-      source: { kind: 'markdown' },
+      source: parseSourceRef(meta.sourceRef),
       confidence: parseConfidence(meta.confidence),
       firstSeenAt: meta.firstSeenAt || updatedAt,
       updatedAt,
@@ -469,6 +600,11 @@ function parseMetadata(raw: string): Record<string, string> {
     meta[key.trim()] = valueParts.join(':').trim();
   }
   return meta;
+}
+
+function parseSourceRef(value?: string): MemorySourceRef {
+  try { if (value) return JSON.parse(decodeURIComponent(value)); } catch { /* legacy metadata */ }
+  return { kind: 'markdown' };
 }
 
 function parseConfidence(value?: string): LongTermMemoryConfidence {
@@ -514,4 +650,23 @@ function limitText(text: string, max: number): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, max - 3)}...`;
+}
+
+
+function readExcludedIds(memoryPath: string): Set<string> {
+  if (!fs.existsSync(memoryPath)) return new Set();
+  const raw = fs.readFileSync(memoryPath, 'utf8');
+  const match = raw.match(/<!-- xiaoba:excluded:\s*([^]*?)-->/);
+  return new Set((match?.[1] || '').trim().split(/\s+/).filter(Boolean));
+}
+
+function withMemoryLock<T>(memoryPath: string, operation: () => T): T {
+  fs.mkdirSync(path.dirname(memoryPath), { recursive: true, mode: 0o700 });
+  const lock = `${memoryPath}.lock`;
+  try { fs.mkdirSync(lock, { mode: 0o700 }); }
+  catch (error: any) {
+    if (error.code === 'EEXIST') throw new Error('MEMORY_BUSY_OR_INTERRUPTED');
+    throw error;
+  }
+  try { return operation(); } finally { fs.rmdirSync(lock); }
 }

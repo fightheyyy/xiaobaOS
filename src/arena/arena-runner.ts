@@ -1,10 +1,12 @@
-import { spawnSync } from 'child_process';
+import { sandboxExecutor } from '../sandbox/executor';
+import type { SandboxPolicy } from '../sandbox/policy';
+import { shellQuote } from '../sandbox/policy';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PathResolver } from '../utils/path-resolver';
 import { ArenaManager } from './arena-manager';
-import { buildArenaShellCommand } from './arena-shell';
+import { buildArenaShellCommand, arenaRuntimeEnvironment } from './arena-shell';
 import type { ArenaResult } from './arena-workflow';
 import {
   ArenaCleanRuntimeIndex,
@@ -28,7 +30,6 @@ export interface ExecuteArenaRunInput {
   maxTurns?: number;
   replayAttempts?: number;
   dryRun?: boolean;
-  allowUnsandboxed?: boolean;
 }
 
 export interface ExecuteArenaRunResult {
@@ -38,6 +39,7 @@ export interface ExecuteArenaRunResult {
   runner_path: string;
   result_path?: string;
   sandbox_enforced: boolean;
+  sandbox_configured: boolean;
   command_kind: 'sandbox_shell_command' | 'shell_command';
   stdout_path?: string;
   stderr_path?: string;
@@ -82,12 +84,12 @@ export async function executeArenaRun(
     replayAttempts: input.replayAttempts,
     requireEntrypoint: !input.dryRun,
   });
-  const sandboxProfilePath = runtime.launch.sandbox_profile_path;
-  const sandboxEnforced = Boolean(sandboxProfilePath && runtime.launch.sandbox_shell_command);
-  if (!sandboxEnforced && !input.allowUnsandboxed) {
+  const sandboxPolicyPath = runtime.launch.sandbox_policy_path;
+  const sandboxEnforced = Boolean(sandboxPolicyPath && runtime.launch.sandbox_shell_command);
+  if (!sandboxEnforced) {
     throw new Error(
       'Arena runner requires clean-runtime launch.sandbox_shell_command; '
-      + 'pass --allow-unsandboxed only for explicit local debugging.',
+      + 'Anthropic SDK policy is required.',
     );
   }
 
@@ -96,17 +98,18 @@ export async function executeArenaRun(
     command: workerCommand,
     env: runtime.launch.env,
     passThroughEnv: runtime.launch.pass_through_env,
-    ...(sandboxProfilePath && { sandboxProfilePath }),
+    ...(sandboxPolicyPath && { sandboxPolicyPath }),
   });
   const commandKind: ExecuteArenaRunResult['command_kind'] = sandboxEnforced
     ? 'sandbox_shell_command'
     : 'shell_command';
   const runnerPath = path.join(runtime.roots.run_root, 'arena-runner.json');
-  writeJson(runnerPath, {
+  const runnerMetadata = {
     version: 1,
     run_id: runtime.run_id,
     command_kind: commandKind,
-    sandbox_enforced: sandboxEnforced,
+    sandbox_enforced: false,
+    sandbox_configured: sandboxEnforced,
     timeout_ms: timeoutMs,
     worker_command: workerCommand,
     ...(sandboxEnforced
@@ -114,7 +117,8 @@ export async function executeArenaRun(
       : { shell_command: shellCommand }),
     clean_runtime_path: path.join(runtime.roots.run_root, 'clean-runtime.json'),
     created_at: new Date().toISOString(),
-  });
+  };
+  writeJson(runnerPath, runnerMetadata);
 
   if (input.dryRun) {
     return {
@@ -122,18 +126,19 @@ export async function executeArenaRun(
       run_id: runtime.run_id,
       clean_runtime_path: path.join(runtime.roots.run_root, 'clean-runtime.json'),
       runner_path: runnerPath,
-      sandbox_enforced: sandboxEnforced,
+      sandbox_enforced: false,
+      sandbox_configured: sandboxEnforced,
       command_kind: commandKind,
     };
   }
 
   const stdoutPath = path.join(runtime.roots.run_root, 'arena-runner.stdout.log');
   const stderrPath = path.join(runtime.roots.run_root, 'arena-runner.stderr.log');
-  const execution = spawnSync('/bin/sh', ['-lc', shellCommand], {
-    cwd: runtime.roots.workspace_root,
-    env: process.env,
-    encoding: 'utf-8',
-    timeout: timeoutMs,
+  const environment = arenaRuntimeEnvironment(runtime);
+  const execution = await sandboxExecutor.execute({
+    policy: JSON.parse(fs.readFileSync(sandboxPolicyPath!, 'utf8')) as SandboxPolicy,
+    command: workerCommand.map(shellQuote).join(' '),
+    environment: { ...environment, XIAOBA_ARENA_SANDBOXED: '1' }, timeoutMs,
   });
   fs.writeFileSync(stdoutPath, execution.stdout || '', 'utf-8');
   fs.writeFileSync(stderrPath, execution.stderr || '', 'utf-8');
@@ -146,6 +151,7 @@ export async function executeArenaRun(
       + `stderr: ${(execution.stderr || '').slice(0, 1000)}`,
     );
   }
+  writeJson(runnerPath, { ...runnerMetadata, sandbox_enforced: true });
 
   const resultPath = path.join(runtime.roots.run_root, 'arena-result.json');
   if (!fs.existsSync(resultPath)) {
@@ -159,6 +165,7 @@ export async function executeArenaRun(
     runner_path: runnerPath,
     result_path: resultPath,
     sandbox_enforced: sandboxEnforced,
+    sandbox_configured: sandboxEnforced,
     command_kind: commandKind,
     stdout_path: stdoutPath,
     stderr_path: stderrPath,

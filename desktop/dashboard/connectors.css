@@ -1,0 +1,17 @@
+/* Cards, headings, buttons and fields inherit the shared Dashboard components. */
+.connector-mark { width: 36px; height: 36px; display: grid; place-items: center; flex: none; }
+.connector-mark svg { display: block; width: 30px; max-height: 30px; }
+.connector-card .skill-title-block { flex: 1; }
+.connector-card .skill-name { margin: 0; }
+.connector-card .skill-files { overflow-wrap: anywhere; }
+.connector-auth-modal { width: min(560px, 100%); }
+.connector-auth-modal .modal-body { font-family: inherit; white-space: normal; word-break: normal; background: var(--surface); color: var(--text); }
+.connector-auth-modal .config-row { flex-direction: column; align-items: stretch; gap: 6px; }
+.connector-auth-modal .config-label { min-width: 0; }
+.connector-help { margin: 0 0 18px; color: var(--text2); font-size: 13px; line-height: 1.7; }
+.connector-help a { color: var(--text); }
+.connector-redirect { display: block; margin: -8px 0 18px; overflow-wrap: anywhere; color: var(--text2); font-size: 12px; }
+.connector-client-settings summary { cursor: pointer; font-size: 13px; font-weight: 600; margin-bottom: 18px; }
+.connector-notice { color: var(--green); font-size: 13px; line-height: 1.6; margin: 0 0 18px; }
+.connector-notice.error { color: var(--red); }
+.connector-notice:empty { display: none; }

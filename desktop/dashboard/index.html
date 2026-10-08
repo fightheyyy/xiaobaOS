@@ -3539,6 +3539,7 @@
     .config-group.collapsed .config-group-body { max-height: 0 !important; opacity: 0; }
   
   </style>
+  <link rel="stylesheet" href="connectors.css">
 </head>
 <body>
   <!-- Sidebar -->
@@ -3559,6 +3560,9 @@
       </a>
       <a class="nav-item" onclick="switchPage('skills')" data-page="skills">
         <span class="nav-icon">#</span> <span data-i18n="navSkills">Skills</span>
+      </a>
+      <a class="nav-item" onclick="switchPage('connectors')" data-page="connectors">
+        <span class="nav-icon">&amp;</span> <span data-i18n="navConnectors">Connectors</span>
       </a>
       <a class="nav-item" onclick="switchPage('config')" data-page="config">
         <span class="nav-icon">~</span> <span data-i18n="navConfig">Config</span>
@@ -3629,6 +3633,13 @@
         </div>
       </div>
 
+      <!-- Page: Agent connections -->
+      <div class="page" id="page-connectors">
+        <div class="section-title" id="connector-heading">Connectors</div>
+        <p class="connector-notice" id="connector-notice" role="status" aria-live="polite"></p>
+        <div class="skills-grid" id="connector-cards"><div class="loading">Loading...</div></div>
+      </div>
+
       <!-- Page: Config -->
       <div class="page" id="page-config">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
@@ -3666,6 +3677,13 @@
         <div class="skills-grid" id="store-grid"><div class="loading">Loading...</div></div>
       </div>
 
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="connector-modal" role="dialog" aria-modal="true" aria-labelledby="connector-modal-title">
+    <div class="modal connector-auth-modal">
+      <div class="modal-header"><h3 id="connector-modal-title"></h3><button type="button" class="modal-close" id="connector-modal-close" aria-label="Close">&times;</button></div>
+      <div class="modal-body"><form id="connector-auth-form"></form></div>
     </div>
   </div>
 
@@ -3713,6 +3731,7 @@
       createEventHandler: () => () => {},
     };
   </script>
+  <script src="connectors.js"></script>
   <script>
     const API = '';
     const i18n = {
@@ -3720,6 +3739,8 @@
         navRuntime: 'Runtime',
         navRoles: 'Roles',
         navSkills: 'Skills',
+        navConnectors: 'Connectors',
+        pageConnectors: 'Connectors',
         navConfig: 'Config',
         navStore: 'Store',
         navCompanion: 'Chat',
@@ -3873,6 +3894,8 @@
         navRuntime: '运行时',
         navRoles: '角色',
         navSkills: '技能',
+        navConnectors: '应用连接',
+        pageConnectors: '应用连接',
         navConfig: '配置',
         navStore: '商店',
         navCompanion: 'Chat',
@@ -4025,7 +4048,7 @@
     };
     const dashboardLangKey = 'xiaoba.dashboard.lang.v2';
     let currentLang = localStorage.getItem(dashboardLangKey) || 'en';
-    const pageTitles = { services:'pageRuntime', pet:'pageChat', config:'pageConfig', skills:'pageSkills', roles:'pageRoles', store:'pageStore' };
+    const pageTitles = { services:'pageRuntime', connectors:'pageConnectors', pet:'pageChat', config:'pageConfig', skills:'pageSkills', roles:'pageRoles', store:'pageStore' };
     let rolesState = { active: null, roles: [] };
     let skillsState = [];
     let latestStatus = null;
@@ -4105,6 +4128,7 @@
       if (pets.length) renderPet();
       if (Object.keys(configData || {}).length) renderConfig();
       if (storeState.length) renderStore(storeState);
+      window.XiaoBaConnectors?.render();
     }
 
     function switchPage(name) {
@@ -4118,6 +4142,7 @@
       if (nav) nav.classList.add('active');
       const title = document.getElementById('topbar-title');
       if (title) title.textContent = t(pageTitles[name] || 'pageRuntime');
+      if (name === 'connectors') window.XiaoBaConnectors.load();
       if (name === 'roles') fetchRoles();
       if (name === 'pet') fetchPets();
     }
@@ -5112,6 +5137,7 @@
     applyLanguage();
     queueRoleAvatarHydration();
     fetchStatus();fetchSkills();fetchRoles();fetchConfig();fetchStore();fetchPets();
+    window.XiaoBaConnectors.init({ getLanguage: () => currentLang });
     const initialPage = new URLSearchParams(location.search).get('page');
     if (initialPage && pageTitles[initialPage]) switchPage(initialPage);
     pollDashboardNavigation();

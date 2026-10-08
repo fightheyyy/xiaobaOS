@@ -1,7 +1,7 @@
 # Agent Runtime SPEC
 
 状态：Active
-最后更新：2026-08-03
+最后更新：2026-10-08
 适用范围：XiaoBa 的核心 agent harness runtime，包括 `src/core`、`src/providers`、`src/tools`、`src/types/tool.ts` 和 runtime-facing harness docs。
 
 本文是顶层架构模块之一的 Agent Runtime spec。它定义 agent loop、provider transcript、tool boundary 和 session lifecycle；入口、角色策略、观测证据、评测和 Arena 分别由各自模块 spec 维护。
@@ -44,25 +44,34 @@ Current addendum：Contract Boundary now also fixes deterministic cross-adapter 
 
 Current addendum：context compression now emits structured runtime evidence. `AgentSession` records restore / pre-message compaction, and `ConversationRunner` records pre-request compaction inside tool loops. Each successful compaction writes a `context_compaction` event plus a compact-after snapshot in the owning session log directory, so replay/debug consumers can anchor later behavior to the post-compact working memory without storing full pre-compact context by default.
 
-Current addendum：EvolutionCat 的 `remember` 是 role-scoped deterministic tool。它复用 `MemoryFinalizer` 的 session-person Markdown 合同，优先按可信 `parentSessionId`、否则按当前 `sessionId` 哈希写入 `memory/sessions/<hash>/MEMORY.md`，返回 canonical ToolResult 和 tool-owned artifact evidence；它不是 Skill，也不会对 Base 或其他角色注册。
+Current addendum：EvolutionCat 的 `remember` 是 role-scoped deterministic tool。它复用 `MemoryFinalizer` 的 session-person Markdown 合同，优先按可信 `parentSessionId`、否则按当前 `sessionId` 哈希写入 `memory/sessions/<hash>/MEMORY.md`，返回 canonical ToolResult 和 tool-owned artifact evidence；它不是 Skill，也不会对 Base 或其他角色注册。remember 已支持 replaces 和 action=forget；读写 root 与 ToolManager 工作区一致。
 
 Current addendum：每个 `SubAgentSession` 写入独立的标准 `logs/sessions/subagent/**/traces.jsonl`。terminal row 保留可信 parent、role、skill、ToolResult 和 artifact lineage。`evolution sleep` 已调用轻量 Evolution control workflow，旧 typed-route runner 已删除；Evolution 只组合共享 Test、Eval 与 capability new-Session / code next-process activation。
 
-Current addendum：Case Replay 现在默认使用专用只读 ToolManager，只暴露 `read_file`、`glob` 与 `grep`；正式 Case adapter 还会放入隔离子进程。显式 `workspace_write` Case 只有在 Arena/Evolution clean runtime 设置 enforced sandbox 时才能获得候选工作区的文件与 Shell 工具；delivery、Browser、GUI 和 Secretary 工具始终不注册。Source Candidate Test 复用 macOS Seatbelt：允许读取系统 runtime 与依赖、禁止读取生产源码，并且只允许写候选副本、测试临时目录与一次性 BrowserCat 短 runtime 根；两个会自行创建原生沙箱的 contract test file 单独运行其自身 sandbox，避免无意义的 sandbox nesting。沙箱不可用时 fail closed。
+Current addendum：Case Replay 现在默认使用专用只读 ToolManager，只暴露 `read_file`、`glob` 与 `grep`；正式 Case adapter 还会放入隔离子进程。显式 `workspace_write` Case 只有在 Arena/Evolution clean runtime 设置 enforced sandbox 时才能获得候选工作区的文件与 Shell 工具；delivery、Browser、GUI 和 Secretary 工具始终不注册。Source Candidate Test 复用统一 Anthropic Sandbox Runtime SDK：允许读取系统 runtime 与依赖、禁止读取生产源码，并且只允许写候选副本、测试临时目录与一次性 BrowserCat 短 runtime 根；两个会自行创建沙箱的 contract test file 仍在独立测试阶段运行，但该阶段本身也受 SDK 外层沙箱约束；不在宿主直接执行候选测试代码。沙箱不可用时 fail closed。
 
 Current addendum：code Finding 通过一次性 `delegate_code` 从 EvolutionCat 路由到 EngineerCat。EngineerCat 仍运行同一个 `SubAgentSession` / `ConversationRunner` loop，只在 secret-free 源码副本内写入。确定性 Source Candidate builder 显式隐藏 `codex_run`，候选完成完整 build、repository tests 和 shared Eval 后，source + dist 以可回滚文件事务替换，并只由下一进程加载；这不是第二套 XiaoBa runtime 或 Candidate lifecycle。
 
-Current addendum：显式配置 `allowedWriteRoot` 的窄 SubAgent workflow 现在同时约束文件写工具和 Shell。`write_file` / `edit_file` 拒绝绝对路径、`..` 与 symlink escape；macOS Shell 通过 Seatbelt 包装，允许广泛读取但只允许写 `allowedWriteRoot`，HOME/TMP 也落在该根目录。Seatbelt 不可用时该受限 Shell fail closed，普通未配置 `allowedWriteRoot` 的 SubAgent 行为不变。EngineerCat 没有独立的内层写控制面，Scheduled Repair 直接在这套共享工具边界内运行。
+Current addendum：显式配置 `allowedWriteRoot` 的窄 SubAgent workflow 现在同时约束文件写工具和 Shell。`write_file` / `edit_file` 拒绝绝对路径、`..` 与 symlink escape；文件工具与 Shell 都进入统一 SDK 边界，读取只恢复所需工作区/运行依赖，写入限于 `allowedWriteRoot` 和私有 HOME/TMP。普通 SubAgent 的文件写入也默认限制在任务工作区；SDK 不可用时 fail closed。EngineerCat 没有独立的内层写控制面，Scheduled Repair 直接在这套共享工具边界内运行。
 
 ```mermaid
 flowchart LR
+    Tools --> Execution["Shell / file tools / bounded workers"]
+    Execution --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    ToolManager --> AppTools["App tools / exact write confirmation"]
+    AppTools --> AppService["Agent connection service / runtime context"]
+    SessionTimer["Persisted session reminders / checks"] --> ScheduledEvents
+    ScheduledEvents --> SessionWake["Existing Surface / AgentSession"]
+    DailyScheduler["Shared Scheduler / one cron tick"] --> ScheduledEvents["Event Dispatcher"]
+    ScheduledEvents --> EvolutionConsumer["Evolution workflow / supervised worker"]
+    ScheduledEvents --> MemoryConsumer["Scoped memory maintenance"]
     subgraph Inputs["Inputs"]
         SurfaceTurn["surface user turn"]
         EvolutionTrigger["scheduled evolution trigger"]
         RolePolicy["role prompt / tool policy"]
         SurfaceContext["surface context"]
         SkillPolicy["active skills"]
-        Memory["memory context"]
+        Memory["bounded file memory indexes"]
     end
 
     subgraph Runtime["Runtime"]
@@ -78,7 +87,7 @@ flowchart LR
         Observability["Observability<br/>local summary + optional OTLP trace"]
         CompactEvidence["compact evidence<br/>event + after snapshot"]
         EvolutionControl["Evolution control<br/>shared Test + Eval"]
-        WriteBoundary["SubAgent write boundary<br/>path guard + Seatbelt"]
+        WriteBoundary["SubAgent write boundary<br/>path guard + SDK"]
         CodexAdapter["EngineerCat codex_run<br/>official SDK boundary"]
         CodexThread["local Codex thread<br/>start / resume"]
     end
@@ -94,6 +103,7 @@ flowchart LR
     EvolutionTrigger --> EvolutionControl
     EvolutionControl --> Subagent
     Session --> Subagent
+    Subagent --> ChildJournal["Durable child inspection / interrupted metadata"]
     Subagent --> WriteBoundary
     WriteBoundary --> ToolManager
     RolePolicy --> PromptManager
@@ -103,6 +113,7 @@ flowchart LR
     SurfaceContext --> Session
     SkillPolicy --> Session
     Memory --> Session
+    Memory --> Subagent
     Session --> Compressor
     Compressor --> CompactEvidence
     Session --> Runner
@@ -125,17 +136,39 @@ flowchart LR
     CompactEvidence --> SessionLog
 ```
 
+## File-system memory
+
+记忆以 Markdown 为真相源，不使用向量数据库。`memory/MEMORY.md` 是当前工作区
+明确共享的项目索引；`memory/sessions/<hash>/MEMORY.md` 保留现有隔离的会话
+记忆合同。每次执行读取有界索引，详情通过已有 read_file / glob / grep 按需获取。
+记忆是低于当前请求的历史上下文，不授予工具权限；不把它复制到恢复 transcript。
+EvolutionCat 保持 remember 的写入所有权，支持按 record ID 替换与遗忘；被替换或
+遗忘的旧记录不能因归档旧 transcript 重新出现。写入保护手写内容，使用原子替换
+和独占锁。默认 CLI key 稳定，新的 AgentSession 实例也能读取同一文件。群聊沿用群会话范围；
+不推断跨入口用户 identity。语义冲突由 Agent 根据用户要求识别，再显式替换 ID；
+自动事件跟进仍是后续工作。
+
 ## Target Architecture
 
 目标是把 provider transcript、trace 和 durable session 分清楚，并把 tool result、delivery evidence、runtime failure 和 retry budget 升级为结构化事实。Provider adapter 必须作为可扩展边界存在：OpenAI-compatible、Anthropic Messages 和 Ollama native `/api/chat` 都要统一归一到 `ChatResponse` / `Message` / `ToolDefinition` 合同，而不是把 provider-specific transcript 泄漏到 runner。工具可见性必须支持 role 声明式策略：默认角色继续看到三层 ToolManager 过滤后的工具；显式配置的弱模型/窄动作角色可以通过 active skill 激活 scoped toolsets，并由 runtime 强制执行确认类工具 gate。
 
 ```mermaid
 flowchart LR
+    Execution["Shell / bounded worker"] --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
+    Sandbox --> Native["Seatbelt on macOS / Bubblewrap on Linux"]
+    Tools --> AppTools["App tools / all app operations / confirmed writes"]
+    AppTools --> AppService["Agent-owned Connector service"]
+    SessionTimer["Persisted session reminders / checks"] --> ScheduledEvents
+    ScheduledEvents --> SessionWake["Existing Surface / AgentSession"]
+    DailyScheduler["Shared Scheduler / one cron tick"] --> ScheduledEvents["Event Dispatcher"]
+    ScheduledEvents --> EvolutionConsumer["Evolution workflow / supervised worker"]
+    ScheduledEvents --> MemoryConsumer["Scoped memory maintenance"]
     subgraph Inputs["Inputs"]
         Surface["surface contract"]
         Policy["role / skill policy"]
         SurfacePolicy["surface delivery policy"]
         Durable["durable session state"]
+        FileMemory["file memory indexes<br/>project / trusted person scope"]
         Scheduled["scheduled evolution trigger"]
     end
 
@@ -151,7 +184,7 @@ flowchart LR
         Providers["provider adapters<br/>OpenAI / Anthropic / Ollama native"]
         EvolutionControl["Evolution control<br/>Trace or Case input"]
         Activation["Atomic version activation<br/>capability: new Session<br/>code: next process"]
-        WriteBoundary["bounded SubAgent writes<br/>path guard + native sandbox"]
+        WriteBoundary["bounded SubAgent writes<br/>path guard + SDK"]
     end
 
     subgraph Facts["Structured facts"]
@@ -178,6 +211,8 @@ flowchart LR
     Policy --> Session
     SurfacePolicy --> Session
     Durable --> Session
+    FileMemory --> Session
+    FileMemory --> Subagent
     Scheduled --> EvolutionControl
     EvolutionControl --> Subagent
     EvolutionControl --> Trace
@@ -244,7 +279,7 @@ flowchart LR
 - Provider-visible transcript、trace、durable session 和 visible history 可以内容不同，但必须可关联且不能互相替代；live `AgentSession` trace logs expose `state_boundary` refs for durable session, legacy `working_trace` evidence and provider transcript digest reference, and release-grade state evidence 可用 `state_boundary_contract` + `provider_transcript_normalization` 证明 provider transcript 只是 normalized `sha256` reference，不是 raw messages/tool payloads 或普通路径 ref。Degraded provider transcript evidence must additionally carry structured `degradation_reason` / terminal `status`, `fallback_chain`, `blocked_reason` and explicit false raw-payload storage flags, so provider failures can be audited without raw transcript retention.
 - Provider adapter 负责把各自的消息、tool call、usage 和 streaming 协议归一为 runtime 合同；Ollama native adapter 使用 `/api/chat`、NDJSON streaming、默认 `think:false`、`keep_alive`、`num_ctx` 和可选 API key，以支持本地小模型。
 - Retry 必须有上限；重复失败后应改变策略或报告 blocked reason。显式 `retryable` 的 ToolResult retry exhausted 后必须进入 `blocked` 终态并记录 `retry_count` / `retry_budget` / `retry_budget_exhausted`；同一 run 内重复出现同名、同参、同错误的不可重试 ToolResult，必须在 bounded failure budget 后由 `ConversationRunner` 收束为 `blocked` ToolResult，并记录 prior failure count、budget exhaustion 和 `blocked_reason`；interrupt/cancel 必须进入 `cancelled` 终态且不可重试。
-- SubAgent stop 必须中断 waiting input、role-tool AbortSignal 和 retry backoff，并阻止迟到 callback 进入已关闭的 CLI session；provider HTTP 和通用 Shell 只有在各自 adapter 消费 AbortSignal 后才能声称物理取消，当前仍是明确缺口。
+- SubAgent stop 必须中断 waiting input、role-tool AbortSignal 和 retry backoff，并阻止迟到 callback 进入已关闭的 CLI session；主会话每次请求与 SubAgent 生命周期各自持有 AbortSignal，贯通模型 HTTP/stream、上下文摘要、工具执行和重试等待；取消不得重试、切换备模型或交付迟到回复。后台子任务独立于主会话当前请求，须使用 stop_subagent 显式停止。
 - 外部 browser/GUI driver 只能通过 role-scoped typed tool adapter 进入 Runtime。Adapter 必须使用 fixed binary + `execFile(argv[])`、显式 timeout/AbortSignal、结构化 error code 和不可信内容标记；不得使用 Shell、动态 `npx latest`、MCP sidecar 或 driver 自带 Agent loop 绕过 ToolManager。
 - EngineerCat 是外部 coding executor 的唯一例外入口：`codex_run` 必须是 role-scoped Tool，工作目录来自可信 `ToolExecutionContext`，模型只能选择只读/工作区可写和可选 thread resume。适配器必须传递 AbortSignal，失败必须归一为结构化 ToolResult，不得接受模型提供的 cwd、binary path、network 或 approval policy。XiaoBa 不复制 Codex loop，不引入第二套 job manager/supervisor；续接所需 `thread_id` 只由本次 ToolResult 返回给 EngineerCat。
 - 物理 GUI 是进程外共享副作用资源。GuiCat mutation 在执行前必须持有全局桌面 lease；timeout 后 outcome 为 uncertain，不能自动重放。Browser session identity 由可信父 session、child session 和 workspace 共同派生，使同一父会话并发 BrowserCat 也使用不同 native session。
@@ -276,3 +311,43 @@ Runtime 需要稳定维护这些结构化事实：
 - 从 `docs/roles-skills/SPEC.md` 接收 role prompt、role-scoped tools 和 skill policy。
 - 向 [`../observability-evidence/SPEC.md`](../observability-evidence/SPEC.md) 输出 session logs、runtime events、artifact evidence、trace projection 和 durable state。
 - 由 `test/contract-smoke` 和 `test/scripted-runtime/base-runtime` 分层验证 transcript completeness、failure observability、delivery evidence 和 JSONL compatibility；这些都属于 Test。
+
+## Memory maintenance runtime
+
+`memory maintain` admits a runtime job Event through the shared Scheduler; its consumer emits a scoped window Event per source window. EvolutionCat reuses SubAgentSession / ConversationRunner with an empty runtime-owned Tool allowlist, one model turn and a cooperative two-minute stop timer. It returns a proposal; runtime checks evidence IDs, existing record IDs and the memory digest before a single active-index write. The proposal worker has no channel and cannot dispatch, send, execute Shell or write files. Ordinary role subagents keep existing tool and turn defaults. Nightly maintenance is independent from the macOS-only code evolution sandbox.
+
+Both scheduled consumers reuse the existing EventDispatcher state/claim contract. Evolution retains process-group supervision, workflow locks and sandboxed candidate execution; memory retains proposal validation and scoped file locks. The common layer adds no Agent loop. Evolution trace harvesting continues to use the host-local date window; the schedule timezone controls trigger time and admission date, not the existing trace harvester semantics.
+
+个人连续性以已有 sessionKey 为边界：同一 key 的对话与长期记忆持续累积，不自动绑定或合并跨入口身份。群聊按群会话、Pet/CLI 按其既有会话范围共享；sessionKey 不等价于统一的自然人身份。
+
+## Session timed wakeups
+
+`MessageSessionManager` restores the original AgentSession and applies the existing busy/destroying guard. `remind` sends the saved text without model inference and injects a delivered-context note. `check` passes a `[scheduled_wakeup]` input through the existing memory injection, model, Tool loop and persistence. This internal check carries its historical purpose/source and explicitly grants no additional authorization. A transient clock is regenerated for every user turn/check, overriding dates from old session prompts and removed before snapshot persistence. It is absent from visible received-user history and excluded from automatic memory-finalizer fact extraction.
+
+The existing Surface delivery contract decides whether output is visible; no forced reply is generated for a quiet check. `HandleMessageResult.failed` propagates runner failures to the reminder ledger rather than falsely acknowledging completion. CLI uses the existing serialized feedback queue but propagates check failure to Event admission. If the task still needs attention, Base creates another check; the running record cannot be edited or cancelled. Child agent and narrow role allowlists cannot obtain the timer tool. A busy transition during admission can yield a failed check requiring review; no blind delivery retry is introduced.
+
+## Agent-owned app connections
+
+Base can discover supported app operations and invoke authorized Gmail/Notion/GitHub reads or confirmed writes through existing ToolManager/ConversationRunner. Connection credentials belong to the Agent and never appear in model arguments or results. Request policy is checked against trusted surface/session (children are denied); each valid main CLI/Feishu/Weixin/Pet session has all declared app operations by default; child calls remain denied. Write tools reuse runtime confirmation with complete payload binding, and native API failures return structured ToolResult facts. No new role, Agent loop, MCP runtime or task subsystem.
+
+
+`connector_describe` returns public operation summaries or one operation's schema without account state. `<app>_read` and `<app>_write_confirmed` accept only operation/args; requester identity comes from ToolExecutionContext, never model arguments. Discovery filters unavailable connections, and execution rechecks trusted main-session context and enabled state on every invocation. The service can inject an AgentCredentials provider; default StoredAgentCredentials reads the private Agent credential file on each call, falls back to environment references when no app record exists, and reuses cached single-flight Gmail OAuth refresh. New connectors are Base-only; no implicit child authority inheritance.
+
+Write confirmation binds the complete nested operation/args to the most recent proposal in the immediately preceding assistant interval, preserving case. On channel surfaces, only a successfully delivered send_text proposal qualifies; hidden assistant text does not. Internal injected/scheduled user messages cannot supply approval. The existing legacy confirmation policy for role tools remains intact. Connector context validation does not sandbox general Shell/file access; untrusted-host multi-tenancy needs a separate runtime tool boundary.
+
+
+## Unified SandboxExecutor
+
+`src/sandbox` owns the pinned `@anthropic-ai/sandbox-runtime@0.0.79` SDK adapter, not another Agent loop or paid execution service. `policy.ts` builds trusted filesystem/network policies; `executor.ts` handles bounded output, timeout, AbortSignal and process-group cleanup; `worker.ts` owns exactly one SDK manager per invocation. SDK initialization errors return `SANDBOX_UNAVAILABLE`, never an unsandboxed fallback. Node >=22.12 is required; this adapter supports macOS and Linux, and explicitly blocks Windows pending validation.
+
+Ordinary Shell and ToolManager file tools share this boundary. File tools run their existing implementations in `file-worker.ts`; write preflight rejects traversal/symlink escapes, while OS isolation enforces actual I/O. Only runtime-owned `sandboxPolicy` can override defaults. System/runtime dependencies and current workspace are readable; private Agent data, .env/SSH/cloud credentials and unrelated session memory are excluded. The shared project memory index and current trusted parent/session directory are explicitly restored read-only. Connector service and remember/delivery tools remain trusted host capabilities with their existing role/context/confirmation checks.
+
+An isolated worker avoids the SDK's process-global configuration being changed by concurrent sessions. Linux read isolation hides /tmp, so only the SDK's exact per-invocation bridge socket paths are restored after initialization. Helper executables and their canonical symlink targets are readable. Task HOME/TMP are private; SDK host-side bridge sockets use short /tmp names. Configs and policy JSON contain no token values.
+
+Arena/Evolution use `anthropic_sdk` and `launch.sandbox_policy_path` pointing to `anthropic-policy.json`. Hand-written Seatbelt profiles and unsandboxed launch options are removed; legacy macos_seatbelt/linux_bubblewrap CLI names map to this one backend. Provider configuration is selected on the host from XIAOBA_LLM_* only, then explicitly injected into trusted evaluation workers; app tokens are not copied. OpenAI/Ollama Axios and Anthropic SDK transports explicitly use the SDK proxy, including host-local provider endpoints. Existing bounded Shell inside an SDK evaluation worker inherits the outer boundary after environment scrubbing; a narrower SubAgent policy still requires its own SDK isolation.
+
+`xiaoba sandbox check` executes a real SDK probe. Linux needs Bubblewrap, socat, ripgrep and usable user namespaces; macOS uses the SDK's Seatbelt implementation. Existing Codex SDK internal sandbox and Browser/GUI/Feishu driver capability boundaries remain separate external adapters; this change replaces XiaoBa-owned process sandbox implementations. CPU/memory/PID quotas, hostile cloud multi-tenancy and durable crash recovery are not implemented by this adapter. Timeout/cancellation cleanup covers supervised process groups and Linux namespace descendants; it is not a claim of a general daemon supervisor.
+
+## Interrupted child inspection
+
+Existing SubAgentManager children persist bounded progress/role/skill/status/question/output metadata under `data/subagents` before launch, on progress and at termination. On a new process, the same parent session can inspect locally terminated owners as `interrupted` through its existing transient status/check_subagent path. Live/unknown-host owners are not adopted; records do not merge sessions. Recovery is explicit remaining-work dispatch after artifact/effect review, not automatic transcript resume or replay. Full durable tool cursors/pending action recovery remains future work.

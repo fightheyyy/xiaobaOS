@@ -1,3 +1,4 @@
+import { EventDispatcher, surfaceAgentEvent } from '../events';
 import { Request, Response, Router } from 'express';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -135,6 +136,7 @@ export function normalizePetMessageSurfaceEvent(
 }
 
 export interface PetChannelOptions {
+  eventDispatcher?: EventDispatcher;
   services?: AgentServices;
   sessionTtlMs?: number;
   /** Internal runtime pin. HTTP callers cannot select or override this Skill. */
@@ -153,6 +155,7 @@ export function createPetRouter(options: PetChannelOptions = {}): Router {
 
 export class PetChannel {
   readonly router = Router();
+  private readonly eventDispatcher: EventDispatcher;
   private readonly services: AgentServices;
   private readonly sessionManager: MessageSessionManager;
   private readonly skillsReady: Promise<void>;
@@ -164,6 +167,7 @@ export class PetChannel {
   private readonly requiredActiveSkillName?: string;
 
   constructor(options: PetChannelOptions = {}) {
+    this.eventDispatcher = options.eventDispatcher || new EventDispatcher();
     this.requiredActiveSkillName = options.requiredActiveSkillName?.trim() || undefined;
     this.useFixedServices = Boolean(options.services);
     const skillManager = options.services?.skillManager || new SkillManager();
@@ -185,6 +189,15 @@ export class PetChannel {
     this.sessionManager.setWakeupSendFn(async (channelId, text) => {
       Logger.info(`[pet:${channelId}] wakeup: ${text.slice(0, 120)}`);
     });
+
+    this.sessionManager.setReminderChannelFactory(async record => {
+      const petId = this.normalizePetId(record.sessionKey.split(':')[1]);
+      this.normalizeSessionKey(petId, record.sessionKey);
+      await this.ensureSkillsReadyForSessionKey(record.sessionKey);
+      this.assertRequiredSkillAvailable(record.sessionKey);
+      return journalVisibleChannel(this.createConversationTurn(record.sessionKey), this.buildBackgroundChannel(record.sessionKey, petId));
+    });
+    this.sessionManager.startReminderProcessing();
 
     this.mountRoutes();
   }
@@ -333,87 +346,93 @@ export class PetChannel {
       const source = normalized.source || 'unknown';
       const sessionKey = normalized.sessionKey;
       const traceparent = normalized.traceparent;
-      journalTurn = this.withConversationRole(await recordVisibleInbound({
-        surface: 'pet',
-        sessionKey,
-        content: [{ type: 'text', text }],
-        sourceEventId: normalized.eventId,
-      }));
-      await this.ensureSkillsReadyForSessionKey(sessionKey);
-      this.assertRequiredSkillAvailable(sessionKey);
-      const activeSession = this.sessionManager.getOrCreate(sessionKey, sessionKey);
-      session = activeSession;
-      this.registerSubAgentCallbacks(sessionKey, petId);
-      stream.setFanout(event => this.events.publish(petId, sessionKey, event));
-      const channel = journalVisibleChannel(journalTurn, this.buildChannel(sessionKey, stream));
-      const callbacks = this.buildCallbacks(stream, chunk => {
-        streamedVisibleText += chunk;
-      });
-
-      stream.open();
-      activeSession.runWithLogContext(() => Logger.info(`[${sessionKey}] 收到 pet 消息 (${source}): ${text.slice(0, 120)}`));
-      stream.event({ type: 'user_message', text, source, sessionKey });
-
-      const result = await this.enqueueMessage(sessionKey, async () => {
-        stream.state('waiting', 'processing');
-        await this.activateRequiredSkill(activeSession);
-
-        let resultText = '';
-        let visibleToUser = true;
-        if (text.startsWith('/')) {
-          const parts = text.slice(1).split(/\s+/).filter(Boolean);
-          const command = parts[0] || '';
-          const args = parts.slice(1);
-          const commandResult = await activeSession.handleCommand(command, args, {
-            callbacks,
-            channel,
-            surface: 'pet',
-            traceparent,
-            traceId: journalTurn?.traceId,
-          });
-          if (command.toLowerCase() === 'clear' && args.includes('--all')) {
-            this.chatHistory.delete(sessionKey);
-            this.events.clear(sessionKey);
-          }
-          resultText = commandResult.reply || '';
-          visibleToUser = commandResult.handled;
-          if (!commandResult.handled) {
-            resultText = `未识别命令：/${command}`;
-          }
-        } else {
-          const messageResult = await activeSession.handleMessage(text, {
-            callbacks,
-            channel,
-            surface: 'pet',
-            traceparent,
-            traceId: journalTurn?.traceId,
-          });
-          resultText = messageResult.text;
-          visibleToUser = messageResult.visibleToUser;
-        }
-
-        return { resultText, visibleToUser };
-      });
-
-      if (streamedVisibleText && journalTurn) {
-        await recordVisibleAssistant({
-          ...journalTurn,
-          content: [{ type: 'text', text: streamedVisibleText }],
-          deliveryKey: 'pet:visible-stream',
+      const receipt = await this.eventDispatcher.dispatch(surfaceAgentEvent(normalized), async () => {
+        journalTurn = this.withConversationRole(await recordVisibleInbound({
+          surface: 'pet',
+          sessionKey,
+          content: [{ type: 'text', text }],
+          sourceEventId: normalized.eventId,
+        }));
+        await this.ensureSkillsReadyForSessionKey(sessionKey);
+        this.assertRequiredSkillAvailable(sessionKey);
+        const activeSession = this.sessionManager.getOrCreate(sessionKey, sessionKey);
+        session = activeSession;
+        this.registerSubAgentCallbacks(sessionKey, petId);
+        stream.setFanout(event => this.events.publish(petId, sessionKey, event));
+        const channel = journalVisibleChannel(journalTurn, this.buildChannel(sessionKey, stream));
+        const callbacks = this.buildCallbacks(stream, chunk => {
+          streamedVisibleText += chunk;
         });
-      }
-      if (!stream.hasText && result.resultText) {
-        stream.text(result.resultText);
-        if (journalTurn) {
+
+        stream.open();
+        activeSession.runWithLogContext(() => Logger.info(`[${sessionKey}] 收到 pet 消息 (${source}): ${text.slice(0, 120)}`));
+        stream.event({ type: 'user_message', text, source, sessionKey });
+
+        const result = await this.enqueueMessage(sessionKey, async () => {
+          stream.state('waiting', 'processing');
+          await this.activateRequiredSkill(activeSession);
+
+          let resultText = '';
+          let visibleToUser = true;
+          if (text.startsWith('/')) {
+            const parts = text.slice(1).split(/\s+/).filter(Boolean);
+            const command = parts[0] || '';
+            const args = parts.slice(1);
+            const commandResult = await activeSession.handleCommand(command, args, {
+              callbacks,
+              channel,
+              surface: 'pet',
+              traceparent,
+              traceId: journalTurn?.traceId,
+            });
+            if (command.toLowerCase() === 'clear' && args.includes('--all')) {
+              this.chatHistory.delete(sessionKey);
+              this.events.clear(sessionKey);
+            }
+            resultText = commandResult.reply || '';
+            visibleToUser = commandResult.handled;
+            if (!commandResult.handled) {
+              resultText = `未识别命令：/${command}`;
+            }
+          } else {
+            const messageResult = await activeSession.handleMessage(text, {
+              callbacks,
+              channel,
+              surface: 'pet',
+              traceparent,
+              traceId: journalTurn?.traceId,
+            });
+            resultText = messageResult.text;
+            visibleToUser = messageResult.visibleToUser;
+          }
+
+          return { resultText, visibleToUser };
+        });
+
+        if (streamedVisibleText && journalTurn) {
           await recordVisibleAssistant({
             ...journalTurn,
-            content: [{ type: 'text', text: result.resultText }],
-            deliveryKey: 'pet:direct',
+            content: [{ type: 'text', text: streamedVisibleText }],
+            deliveryKey: 'pet:visible-stream',
           });
         }
+        if (!stream.hasText && result.resultText) {
+          stream.text(result.resultText);
+          if (journalTurn) {
+            await recordVisibleAssistant({
+              ...journalTurn,
+              content: [{ type: 'text', text: result.resultText }],
+              deliveryKey: 'pet:direct',
+            });
+          }
+        }
+        stream.state('waving', 'done');
+        stream.done(result.resultText, result.visibleToUser);
+      });
+      if (receipt.duplicate) {
+        stream.open();
+        stream.done('', false);
       }
-      stream.state('waving', 'done');
-      stream.done(result.resultText, result.visibleToUser);
     } catch (err: any) {
       if (streamedVisibleText && journalTurn) {
         await recordVisibleAssistant({

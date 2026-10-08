@@ -19,9 +19,11 @@ export interface StreamCallbacks {
  * AI Provider 统一接口
  * 抽象不同 AI 服务商的调用差异
  */
+export interface ProviderCallOptions { abortSignal?: AbortSignal }
+
 export interface AIProvider {
   /** 普通（非流式）调用 */
-  chat(messages: Message[], tools?: ToolDefinition[]): Promise<ChatResponse>;
+  chat(messages: Message[], tools?: ToolDefinition[], options?: ProviderCallOptions): Promise<ChatResponse>;
   /** 流式调用 */
-  chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks): Promise<ChatResponse>;
+  chatStream(messages: Message[], tools?: ToolDefinition[], callbacks?: StreamCallbacks, options?: ProviderCallOptions): Promise<ChatResponse>;
 }

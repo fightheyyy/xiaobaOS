@@ -1,14 +1,16 @@
 # Roles & Skills PLAN
 
 状态：Active
-最后更新：2026-08-27
+最后更新：2026-10-08
 Owner：Policy maintainers
 
 ## Current Status
 
 - Base 是唯一 user-facing Main Agent。
+- EvolutionCat 的 remember 已支持按 ID 替换与遗忘；写入权限仍 role-scoped，Runtime 提供有界文件记忆读取。
 - 默认发行物包含八个 Role 和零个 Base Skill。
 - EngineerCat、BrowserCat、GuiCat、SecretaryCat 负责执行接管。
+- SecretaryCat App 执行已抽出为共享 FeishuConnector；Tool schema、确认、receipt 和 profile 选择保持兼容。后续其他 driver 迁移跟随 Surface 集成 PLAN。
 - GuiCat typed desktop adapter 继续限定在窄 macOS GUI driver 边界内。
 - UserCat、InspectorCat、ReviewerCat、EvolutionCat 是共享 Assurance & Evolution 角色。
 - UserCat 已移除两个规划型 local Skills；只保留兼容 trace Tool，并新增 Scenario proposer。
@@ -75,11 +77,20 @@ flowchart LR
 
 ## Risks / Open Questions
 
-- Source Candidate 的完整 Test 依赖 enforced native sandbox；当前仅 macOS 可执行，其他平台 fail closed。
+- Source Candidate 的完整 Test 依赖 enforced native sandbox；统一 SDK 支持 macOS/Linux；当前 Linux 实测通过，macOS 发行构建待验收。
 - 自动激活必须保留原版本，以便失败时回滚，但不应演化成新的 lifecycle subsystem。
 - BrowserCat/GuiCat/SecretaryCat 的外部 driver 可用性仍是独立运维风险。
 
 ## Recent Verification
+
+- 2026-10-08: build passed; file-memory/runtime/Role focused tests passed 33/33;
+  repository regression passed 591/592. The sole failure remains the existing
+  Evolution descendant-process timeout assertion in this cloud container.
+  Coverage proves fresh Session recall, edit refresh, root consistency, bounded
+  and scoped reads, correction/forget, archive exclusion, legacy Markdown upgrade,
+  managed-block integrity and non-persistence of injected memory.
+
+- 2026-10-07: extracted Connector and existing SecretaryCat/Feishu integration tests pass within the 56/56 focused suite; confirmation, profile selection and cancellation remain covered.
 
 - `npm test` passed 584/584 across 105 suites。
 - EngineerCat 相关 focused tests passed 31/31 across 5 suites；真实官方 SDK read-only start/resume smoke 保持同一 thread id，且没有文件改动或外部工具调用；macOS arm64 packaged adapter resume 也通过。
@@ -94,3 +105,26 @@ flowchart LR
 - UserCat Scenario tests passed 3/3。
 - `npm run build` passed。
 - Dashboard/Pet focused tests passed 35/35；coverage includes default-role identity、4096 collision-free custom-role slots、explicit collision reassignment、canonical-key collision rejection、shared procedural avatars and removal of legacy PNG mappings。Playwright verified 14/14 unique live Role canvas colors with zero renderer errors。Procedural-only Pet coverage includes `grok-cat-v1` publishing contracts and rejection of legacy sprite manifests。Exact-hash Electron migration updates previously shipped built-in configs without overwriting user-modified role files.
+
+## Proactive memory maintenance
+
+Owner: EvolutionCat / Base. Completed: proactive dispatch rules, evidence/confidence on remember, deterministic archive and nightly proposal contract. Stable facts do not age out; uncertain semantic judgments remain model-owned. Next: assess precision against real personal conversations before tuning thresholds. Verification: 39/39 focused tests, including trusted-parent archive and source/confidence roundtrip.
+
+## Shared scheduled events
+
+Owner: Role maintainers. Completed: Evolution and memory consumers keep existing role responsibilities while common Scheduler/Event infrastructure owns triggering. Legacy schedule classes are compatibility facades with no separate cron/time implementation. Evolution installation supports Linux/macOS and execution requires the shared SDK sandbox. Consumer/CLI focused coverage passed; full regression 615/616, with only the existing cloud descendant-process SIGKILL assertion failing.
+
+## Session timer responsibility
+
+Owner: Base. Completed: prompt guidance for explicit reminders, autonomous checks, timezone resolution, successful-write confirmation and purposeful follow-up end conditions. Children report timer needs to the parent and cannot schedule directly; narrow role allowlists retain their policy. Acceptance: actual tool persistence/owner denial and quiet shared-loop checks verified; build and focused 47/47 passed. Next: evaluate proactive scheduling frequency with real conversations; no new role or generic task framework.
+
+## Agent-owned app connections
+
+Owner: Base / Roles. Completed: prompt guidance for Agent-owned accounts, schema discovery, exact write proposals and external-content distrust; SecretaryCat and eight role boundaries unchanged. Children cannot call new native connectors. Next: observe connector use and consider explicit constrained delegation; do not expand role allowlists implicitly.
+
+Verification: TypeScript build and focused native connector / Feishu boundary / role-tool tests 39/39 passed, including real AgentSession confirmed-write execution with mocked official HTTP. Full regression 650/651 passed; the only failure remains the pre-existing cloud Evolution descendant-process SIGKILL assertion. Live app accounts are not yet verified.
+
+
+## Unified sandbox execution
+
+Owner: Runtime / Role maintainers. Completed: bounded SubAgent file/Shell policies and candidate execution reuse the shared SDK; default writes now stay inside the task workspace. Linux/macOS scheduling no longer has a hard-coded macOS check, while execution still requires working isolation. Role inventory/confirmation/external Codex contracts remain unchanged. Verification and platform limits are in `../agent-runtime/PLAN.md`.
