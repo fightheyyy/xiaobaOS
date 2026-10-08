@@ -332,11 +332,11 @@ export class FeishuBot {
     // 注册持久化平台回调到 SubAgentManager
     // 子智能体完成后通过 injectMessage 通知主 Agent
     const subAgentManager = SubAgentManager.getInstance();
-    subAgentManager.registerPlatformCallbacks(key, {
+    subAgentManager.refreshPlatformCallbacks(key, {
       injectMessage: async (text: string) => {
         await this.handleSubAgentFeedback(key, msg.chatId, msg.senderId, text);
       },
-    });
+    }, this.sessionManager);
 
     // 处理斜杠命令
     if (msg.text.startsWith('/')) {
@@ -467,49 +467,16 @@ export class FeishuBot {
     senderId: string,
     text: string,
   ): Promise<void> {
-    const MAX_RETRIES = 10;
-    const RETRY_DELAY_MS = 5000;
-
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      if (attempt > 0) {
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
-      }
-
-      const session = this.sessionManager.getOrCreate(sessionKey);
-
-      // 等待主会话空闲
-      if (session.isBusy()) {
-        session.runWithLogContext(() => Logger.info(`[${sessionKey}] 主会话忙，等待重试注入子智能体反馈 (${attempt + 1}/${MAX_RETRIES + 1})`));
-        continue;
-      }
-
+    await this.sessionManager.enqueueTurn(sessionKey, chatId, async session => {
       const turn = this.createTurnContext(sessionKey);
-      const channel = journalVisibleChannel(turn, this.buildChannel(chatId, {
-        sessionKey,
-        senderId,
-      }));
-
+      const channel = journalVisibleChannel(turn, this.buildChannel(chatId, { sessionKey, senderId }));
       try {
-        const result = await session.handleMessage(text, {
-          channel,
-          surface: 'feishu',
-          traceId: turn.traceId,
-        });
-        if (result.text === BUSY_MESSAGE) {
-          session.runWithLogContext(() => Logger.info(`[${sessionKey}] 主会话竞态忙碌，将重试`));
-          continue;
-        }
-        if (result.finalResponseVisible && result.text) {
-          await channel.reply(chatId, result.text);
-        }
+        const result = await session.handleMessage(text, { channel, surface: 'feishu', traceId: turn.traceId, internal: true });
+        if (result.failed) throw new Error('SUBAGENT_FEEDBACK_RUN_FAILED');
+        if (result.finalResponseVisible && result.text) await channel.reply(chatId, result.text);
         await this.drainMessageQueue(sessionKey);
-        return;
-      } finally {
-        this.clearPendingAnswerBySession(sessionKey);
-      }
-    }
-
-    Logger.warning(`[${sessionKey}] 子智能体反馈注入失败：主会话持续忙碌`);
+      } finally { this.clearPendingAnswerBySession(sessionKey); }
+    });
   }
 
   /**
@@ -519,6 +486,9 @@ export class FeishuBot {
     const queue = this.messageQueue.get(sessionKey);
     if (!queue || queue.length === 0) return;
 
+    // Feedback may have claimed the newly idle session. Leave user messages queued
+    // for that turn's drain instead of consuming them into a BUSY response.
+    if (this.sessionManager.getOrCreate(sessionKey).isBusy()) return;
     // 一次性取出所有积压消息
     const messages = queue.splice(0);
     this.messageQueue.delete(sessionKey);

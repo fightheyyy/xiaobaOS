@@ -2,6 +2,8 @@ import { registerReminderRoute, startReminderPolling, reminderCheckMessage, Sess
 import type { ChannelCallbacks } from '../types/tool';
 import { BUSY_MESSAGE, AgentSession, AgentServices } from './agent-session';
 import { Logger } from '../utils/logger';
+import { SubAgentManager } from './sub-agent-manager';
+import { isCancellation } from '../utils/cancellation';
 
 /** 默认会话过期时间：60 分钟 */
 const DEFAULT_SESSION_TTL = 60 * 60 * 1000;
@@ -36,6 +38,8 @@ export class MessageSessionManager {
   private wakeupSendFn: WakeupSendFn | null = null;
   private contextInjector: ((session: AgentSession) => void) | null = null;
   private sessionType: string;
+  private readonly turnQueues = new Map<string, Promise<void>>();
+  private readonly lifecycleAbort = new AbortController();
 
   constructor(
     private agentServices: AgentServices,
@@ -98,8 +102,9 @@ export class MessageSessionManager {
     if (this.stopReminderPoll || !this.reminderChannelFactory) return;
     const root = this.agentServices.toolManager?.getWorkingDirectory?.() || process.cwd();
     this.unregisterReminderRoute = registerReminderRoute(root, this.sessionType, {
-      available: record => !this.sessions.get(record.sessionKey)?.isBusy() && !this.destroying.has(record.sessionKey),
+      available: record => !this.lifecycleAbort.signal.aborted && !this.sessions.get(record.sessionKey)?.isBusy() && !this.destroying.has(record.sessionKey),
       consume: async record => {
+        if (this.lifecycleAbort.signal.aborted) throw new Error('REMINDER_SURFACE_CLOSED');
         const channel = await this.reminderChannelFactory!(record);
         const session = this.getOrCreate(record.sessionKey, record.channelId);
         if (record.mode === 'remind') {
@@ -122,6 +127,23 @@ export class MessageSessionManager {
     session.injectContext(text);
   }
 
+  /** Serialize a Surface turn per conversation; other sessions continue independently. */
+  enqueueTurn(key: string, channelId: string, consume: (session: AgentSession) => Promise<void>): Promise<void> {
+    const signal = this.lifecycleAbort.signal;
+    if (signal.aborted) return Promise.resolve();
+    const previous = this.turnQueues.get(key) || Promise.resolve();
+    const operation = previous.catch(() => undefined).then(async () => {
+      if (signal.aborted) return;
+      const session = this.getOrCreate(key, channelId);
+      try { await session.waitUntilIdle(signal); }
+      catch (error) { if (isCancellation(error)) return; throw error; }
+      if (!signal.aborted) await consume(session);
+    });
+    const tracked = operation.finally(() => { if (this.turnQueues.get(key) === tracked) this.turnQueues.delete(key); });
+    this.turnQueues.set(key, tracked);
+    return tracked;
+  }
+
   /** 为 session 注入主动唤醒回调 */
   private injectWakeupReply(session: AgentSession, key: string): void {
     if (!this.wakeupSendFn) return;
@@ -142,6 +164,9 @@ export class MessageSessionManager {
       const now = Date.now();
       for (const [key, session] of this.sessions) {
         if (this.destroying.has(key)) continue;
+        if (session.isBusy() || this.turnQueues.has(key)
+          || SubAgentManager.getInstance().listByParent(key, this.agentServices.toolManager?.getWorkingDirectory?.() || process.cwd())
+            .some(child => child.status === 'running' || child.status === 'waiting_for_input')) continue;
         if (now - session.lastActiveAt > this.ttl) {
           this.destroying.add(key);
           this.sessions.delete(key);
@@ -156,12 +181,18 @@ export class MessageSessionManager {
 
   /** 停止清理定时器并保存所有会话 */
   async destroy(): Promise<void> {
+    this.lifecycleAbort.abort();
     this.stopReminderPoll?.();
     this.unregisterReminderRoute?.();
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
+    for (const [key, session] of this.sessions) {
+      SubAgentManager.getInstance().unregisterPlatformCallbacksForOwner(key, this);
+      session.requestInterrupt();
+    }
+    await Promise.allSettled([...this.turnQueues.values()]);
 
     // 保存所有活跃会话
     const cleanupPromises = Array.from(this.sessions.values()).map(session =>
@@ -172,6 +203,6 @@ export class MessageSessionManager {
     await Promise.all(cleanupPromises);
 
     this.sessions.clear();
-    MessageSessionManager.managers.delete(this.sessionType);
+    if (MessageSessionManager.managers.get(this.sessionType) === this) MessageSessionManager.managers.delete(this.sessionType);
   }
 }

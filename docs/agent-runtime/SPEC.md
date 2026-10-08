@@ -103,6 +103,8 @@ flowchart LR
     EvolutionTrigger --> EvolutionControl
     EvolutionControl --> Subagent
     Session --> Subagent
+    Subagent --> Feedback["Live callback ownership / per-session turn queue"]
+    Feedback --> Session
     Subagent --> ChildJournal["Durable child inspection / interrupted metadata"]
     Subagent --> WriteBoundary
     WriteBoundary --> ToolManager
@@ -351,3 +353,7 @@ Arena/Evolution use `anthropic_sdk` and `launch.sandbox_policy_path` pointing to
 ## Interrupted child inspection
 
 Existing SubAgentManager children persist bounded progress/role/skill/status/question/output metadata under `data/subagents` before launch, on progress and at termination. On a new process, the same parent session can inspect locally terminated owners as `interrupted` through its existing transient status/check_subagent path. Live/unknown-host owners are not adopted; records do not merge sessions. Recovery is explicit remaining-work dispatch after artifact/effect review, not automatic transcript resume or replay. Full durable tool cursors/pending action recovery remains future work.
+
+## Asynchronous conversation direction
+
+Within a live Surface lifecycle, refreshed message callbacks retain ownership of existing children. A replacement/closed lifecycle revokes that authority. IM child feedback serializes per original session and waits for actual idle notification, not a fixed retry deadline; shutdown cancels queued feedback. Base may acknowledge long work before execution, delegates through existing role tools, releases the conversation and later judges whether results/questions deserve explicit delivery. No second Agent loop or new task framework.

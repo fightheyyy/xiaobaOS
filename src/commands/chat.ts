@@ -129,7 +129,7 @@ export async function chatCommand(options: CommandOptions): Promise<void> {
 
 export function registerCliSubAgentCallbacks(
   session: AgentSession,
-  renderFeedback: (session: AgentSession, text: string) => Promise<void> = (current, text) => sendSingleMessage(current, text, { throwOnFailure: true }),
+  renderFeedback: (session: AgentSession, text: string) => Promise<void> = (current, text) => sendSingleMessage(current, text, { throwOnFailure: true, internal: true }),
 ): CliSubAgentFeedbackHandle {
   let feedbackQueue: Promise<void> = Promise.resolve();
   let feedbackGeneration = 0;
@@ -337,7 +337,7 @@ function createStreamingCallbacks(spinner: ora.Ora): { callbacks: SessionCallbac
 export async function sendSingleMessage(
   session: AgentSession,
   message: string,
-  options: { recordInbound?: boolean; roleName?: string; traceId?: string; traceparent?: string; throwOnFailure?: boolean } = {},
+  options: { internal?: boolean; recordInbound?: boolean; roleName?: string; traceId?: string; traceparent?: string; throwOnFailure?: boolean } = {},
 ): Promise<void> {
   const turn = options.recordInbound === true
     ? await recordVisibleInbound({
@@ -356,6 +356,7 @@ export async function sendSingleMessage(
   const { callbacks, didStream } = createStreamingCallbacks(spinner);
   const result = await session.handleMessage(message, {
     callbacks,
+    internal: options.internal,
     surface: 'cli',
     traceId: turn.traceId,
     traceparent: options.traceparent,

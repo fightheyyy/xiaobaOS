@@ -41,6 +41,8 @@ class FakeWeixinSessionManager {
     return this.session;
   }
 
+  async enqueueTurn(_key: string, _channel: string, consume: (session: FakeWeixinSession) => Promise<void>): Promise<void> { await consume(this.session); }
+
   async destroy(): Promise<void> {}
 }
 

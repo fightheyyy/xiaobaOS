@@ -234,9 +234,9 @@ export class WeixinBot {
     const session = this.sessionManager.getOrCreate(sessionKey, msg.to_user_id);
     session.runWithLogContext(() => Logger.info(`[${sessionKey}] 收到消息: ${parsed.text?.slice(0, 50) || '[媒体消息]'}${mediaDesc}...`));
     const channel = journalVisibleChannel(this.withRole(turn), this.buildChannel(msg.to_user_id, sessionKey));
-    SubAgentManager.getInstance().registerPlatformCallbacks(sessionKey, {
+    SubAgentManager.getInstance().refreshPlatformCallbacks(sessionKey, {
       injectMessage: text => this.handleSubAgentFeedback(sessionKey, msg.to_user_id, text),
-    });
+    }, this.sessionManager);
 
     let userText = parsed.text || '';
     if (hasMedia) {
@@ -249,45 +249,20 @@ export class WeixinBot {
       userText = userText ? `${userText}\n${attachmentContext}` : `[用户仅上传了附件，暂未给出明确任务]\n${attachmentContext}`;
     }
 
-    const result = await session.handleMessage(userText, {
-      channel,
-      surface: 'weixin',
-      traceId: turn.traceId,
+    await this.sessionManager.enqueueTurn(sessionKey, msg.to_user_id, async current => {
+      const result = await current.handleMessage(userText, { channel, surface: 'weixin', traceId: turn.traceId });
+      await this.sendFinalResponseIfVisible(channel, result);
     });
-    await this.sendFinalResponseIfVisible(channel, result);
   }
 
   private async handleSubAgentFeedback(sessionKey: string, chatId: string, text: string): Promise<void> {
-    const maxRetries = 10;
-    const retryDelayMs = 5000;
-
-    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-      if (attempt > 0) {
-        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
-      }
-
-      const session = this.sessionManager.getOrCreate(sessionKey, chatId);
-      if (session.isBusy()) {
-        session.runWithLogContext(() => Logger.info(`[${sessionKey}] 主会话忙，等待重试注入子智能体反馈 (${attempt + 1}/${maxRetries + 1})`));
-        continue;
-      }
-
+    await this.sessionManager.enqueueTurn(sessionKey, chatId, async session => {
       const turn = this.createTurnContext(sessionKey);
       const channel = journalVisibleChannel(turn, this.buildChannel(chatId, sessionKey));
-      const result = await session.handleMessage(text, {
-        channel,
-        surface: 'weixin',
-        traceId: turn.traceId,
-      });
-      if (result.text === BUSY_MESSAGE) {
-        session.runWithLogContext(() => Logger.info(`[${sessionKey}] 主会话竞态忙碌，将重试`));
-        continue;
-      }
+      const result = await session.handleMessage(text, { channel, surface: 'weixin', traceId: turn.traceId, internal: true });
+      if (result.failed) throw new Error('SUBAGENT_FEEDBACK_RUN_FAILED');
       await this.sendFinalResponseIfVisible(channel, result);
-      return;
-    }
-
-    Logger.warning(`[${sessionKey}] 子智能体反馈注入失败：主会话持续忙碌`);
+    });
   }
 
   async destroy(): Promise<void> {

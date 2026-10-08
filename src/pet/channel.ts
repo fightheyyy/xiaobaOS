@@ -490,11 +490,11 @@ export class PetChannel {
   }
 
   private registerSubAgentCallbacks(sessionKey: string, petId: string): void {
-    SubAgentManager.getInstance().registerPlatformCallbacks(sessionKey, {
+    SubAgentManager.getInstance().refreshPlatformCallbacks(sessionKey, {
       injectMessage: async (text: string) => {
         await this.handleSubAgentFeedback(sessionKey, petId, text);
       },
-    });
+    }, this.sessionManager);
   }
 
   private async handleSubAgentFeedback(sessionKey: string, petId: string, text: string): Promise<void> {
@@ -512,6 +512,7 @@ export class PetChannel {
           callbacks,
           channel,
           surface: 'pet',
+          internal: true,
           traceId: turn.traceId,
         });
       } finally {

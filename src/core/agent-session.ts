@@ -55,6 +55,8 @@ export interface SessionCallbacks {
 
 /** 消息处理选项（由平台适配层传入） */
 export interface HandleMessageOptions {
+  /** Runtime feedback, never an authentic user instruction/approval. */
+  internal?: boolean;
   callbacks?: SessionCallbacks;
   /** 平台通道回调，注入到 ToolExecutionContext 供工具使用 */
   channel?: ChannelCallbacks;
@@ -149,6 +151,7 @@ export class AgentSession {
   /** 外部请求中断当前 run（例如用户在 busy 时发送"停止"） */
   private interruptRequested = false;
   private requestAbortController?: AbortController;
+  private readonly idleWaiters = new Set<() => void>();
   lastActiveAt: number = Date.now();
   private sessionTurnLogger: SessionTurnLogger;
   private compressor: ContextCompressor;
@@ -309,12 +312,14 @@ export class AgentSession {
       let explicitTraceparent: string | undefined;
       let explicitTraceId: string | undefined;
       let deliveryFallbackFinalReply = false;
+      let internal = false;
 
       if (callbacksOrOptions) {
         if (this.isHandleMessageOptions(callbacksOrOptions)) {
           // 新签名 HandleMessageOptions
           const opts = callbacksOrOptions as HandleMessageOptions;
           callbacks = opts.callbacks;
+          internal = opts.internal === true;
           channel = opts.channel;
           explicitSurface = opts.surface;
           explicitObservabilityContext = opts.observabilityContext;
@@ -394,7 +399,7 @@ export class AgentSession {
         await this.init(surface);
         const textContent = typeof text === 'string' ? text : '';
         this.tryAutoActivateSkill(textContent);
-        this.messages.push({ role: 'user', content: text });
+        this.messages.push({ role: 'user', content: text, ...(internal ? { __injected: true } : {}) });
 
 
         // 构建上下文消息
@@ -704,9 +709,12 @@ export class AgentSession {
           ...baseObservabilityAttrs,
           'xiaoba.error_code': 'SESSION_ABORTED',
         }, 'Session ended before completion evidence was recorded.');
-        this.saveRestorableContext();
-        this.busy = false;
-        this.requestAbortController = undefined;
+        try { this.saveRestorableContext(); }
+        finally {
+          this.busy = false;
+          this.requestAbortController = undefined;
+          for (const wake of [...this.idleWaiters]) wake();
+        }
       }
     });
   }
@@ -1179,6 +1187,21 @@ ${conversationText}`;
     return this.busy;
   }
 
+  /** Wait for completion without timer polling or a fixed feedback expiry. */
+  async waitUntilIdle(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw Object.assign(new Error('Session wait cancelled.'), { name: 'AbortError' });
+    while (this.busy) {
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => { this.idleWaiters.delete(wake); signal?.removeEventListener('abort', abort); };
+        const wake = () => { cleanup(); resolve(); };
+        const abort = () => { cleanup(); reject(Object.assign(new Error('Session wait cancelled.'), { name: 'AbortError' })); };
+        this.idleWaiters.add(wake);
+        signal?.addEventListener('abort', abort, { once: true });
+      });
+      if (signal?.aborted) throw Object.assign(new Error('Session wait cancelled.'), { name: 'AbortError' });
+    }
+  }
+
   /** 请求中断当前运行中的对话回合 */
   requestInterrupt(): void {
     if (!this.busy) return;
@@ -1412,7 +1435,8 @@ ${conversationText}`;
 
   private isHandleMessageOptions(value: SessionCallbacks | HandleMessageOptions): value is HandleMessageOptions {
     return (
-      'channel' in value
+      'internal' in value
+      || 'channel' in value
       || 'callbacks' in value
       || 'logInput' in value
       || 'surface' in value

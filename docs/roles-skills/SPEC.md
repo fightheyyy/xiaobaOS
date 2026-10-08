@@ -216,3 +216,7 @@ Base owns direct app coordination through finite Connector tools. Existing Secre
 ## Shared sandbox execution
 
 Roles are unchanged. Evolution and Engineer candidate tools reuse the Runtime SDK boundary; Linux/macOS scheduling is supported when the host sandbox works. External Codex retains its own SDK sandbox contract. See `../agent-runtime/SPEC.md` for the shared adapter.
+
+## Conversational asynchronous work
+
+Base owns the conversation while existing Role children execute long work. Base may send a short acknowledgement before delegation, confirms launch only from tool success, then releases the turn without progress polling. It interprets internal child results/questions and sends useful outcomes through existing send_text/send_file. Quiet maintenance and cancelled/obsolete work do not create obligatory notifications. Natural interaction is prompt policy grounded in current context/memory, without random greetings, fake activity or artificial delay. Human perception of tone remains a live-model acceptance question.

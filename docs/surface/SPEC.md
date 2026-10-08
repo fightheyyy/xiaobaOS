@@ -67,6 +67,8 @@ flowchart LR
     Channels["Feishu / Weixin / Pet / Dashboard / Electron"] --> Adapters
     Adapters -->|Feishu / Weixin / Pet| Event["Event admission<br/>persist / deduplicate / dispatch"]
     Event --> Store["FileEventStore<br/>atomic records / exclusive claim"]
+    ChildFeedback["Child completion / input request"] --> TurnQueue["Live lifecycle / idle turn queue"]
+    TurnQueue --> Session
     Event --> Session["Shared AgentSession<br/>role-scoped services"]
     Adapters -->|CLI and other control paths| Session
     Session --> Tools["SecretaryCat tools<br/>schema / confirmation"]
@@ -266,3 +268,7 @@ xiaoba connector watch-status
 ```
 
 The original Surface service must run to consume checks; shared schedule tick can admit mail while it is offline. `watch-gmail --reset` deliberately establishes a fresh history baseline after an account/cursor gap, without replaying old mail. Do not substitute an invented session/channel when enabling a real mailbox.
+
+## Asynchronous conversation direction
+
+Within a live Surface lifecycle, refreshed message callbacks retain ownership of existing children. A replacement/closed lifecycle revokes that authority. IM child feedback serializes per original session and waits for actual idle notification, not a fixed retry deadline; shutdown cancels queued feedback. Base may acknowledge long work before execution, delegates through existing role tools, releases the conversation and later judges whether results/questions deserve explicit delivery. No second Agent loop or new task framework.

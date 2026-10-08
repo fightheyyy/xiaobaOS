@@ -128,3 +128,7 @@ Verification: TypeScript build and focused native connector / Feishu boundary / 
 ## Unified sandbox execution
 
 Owner: Runtime / Role maintainers. Completed: bounded SubAgent file/Shell policies and candidate execution reuse the shared SDK; default writes now stay inside the task workspace. Linux/macOS scheduling no longer has a hard-coded macOS check, while execution still requires working isolation. Role inventory/confirmation/external Codex contracts remain unchanged. Verification and platform limits are in `../agent-runtime/PLAN.md`.
+
+## Asynchronous conversation
+
+Implemented: lifecycle-owned callback refresh, session-idle turn serialization (IM feedback and Weixin inbound), active-task TTL protection and conversational prompt guidance. Focused 85/85 passed, including actual shared-loop acknowledgement → dispatch → intervening chat → result delivery, owner replacement, shutdown, queue isolation/error recovery and internal approval denial. Full regression 700/701 passed (zero skips); sole failure remains the existing cloud Evolution descendant PID/zombie assertion. Final shutdown-order/route guard refinement passed 20/20 focused lifecycle/reminder tests; build passed. Natural tone/proactive relevance still need live-model use; scripted tests establish transport/lifecycle behavior only. Connector live-account work is deferred by user preference.

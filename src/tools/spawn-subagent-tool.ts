@@ -134,8 +134,8 @@ export class SpawnSubagentTool implements Tool {
       `Skill: ${formatSubAgentSkillLabel(requestedSkillName, allowSkillSelection)}`,
       `状态: running`,
       ``,
-      `子智能体完成后会通知你结果和产出文件列表。届时请用 reply 和 send_file 转发给用户。`,
-      `你可以用 check_subagent 查看进度，用 stop_subagent 停止任务。`,
+      `子智能体完成后会通知你结果和产出文件列表。届时判断是否值得告知；channel 会话用 send_text/send_file 交付，CLI 正常回复。不要向用户照搬子任务 ID 和 Role 日志。`,
+      `派工后释放当前对话，不轮询等待。用户询问进度时用 check_subagent；要求停止时用 stop_subagent。`,
     ].join('\n'));
   }
 }

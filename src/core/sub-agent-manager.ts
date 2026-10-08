@@ -31,6 +31,7 @@ export class SubAgentManager {
   private parentMap = new Map<string, string>();
   /** 持久化的平台回调，key = 父会话 sessionKey */
   private platformCallbacks = new Map<string, PlatformCallbacks>();
+  private callbackOwners = new Map<string, object>();
 
   private static readonly MAX_CONCURRENT_PER_SESSION = 3;
   /** 完成后保留信息的时间（ms） */
@@ -57,6 +58,21 @@ export class SubAgentManager {
    */
   registerPlatformCallbacks(sessionKey: string, callbacks: PlatformCallbacks): void {
     this.platformCallbacks.set(sessionKey, callbacks);
+    this.callbackOwners.delete(sessionKey);
+  }
+
+  /** New message in the SAME live Surface: keep child ownership, refresh its route. */
+  refreshPlatformCallbacks(sessionKey: string, callbacks: PlatformCallbacks, owner?: object): void {
+    const current = this.platformCallbacks.get(sessionKey);
+    if (current && this.callbackOwners.get(sessionKey) === owner) current.injectMessage = callbacks.injectMessage;
+    else {
+      this.registerPlatformCallbacks(sessionKey, callbacks);
+      if (owner) this.callbackOwners.set(sessionKey, owner);
+    }
+  }
+
+  unregisterPlatformCallbacksForOwner(sessionKey: string, owner: object): void {
+    if (this.callbackOwners.get(sessionKey) === owner) this.unregisterPlatformCallbacks(sessionKey);
   }
 
   /**
@@ -71,6 +87,7 @@ export class SubAgentManager {
     if (!current || (expectedCallbacks && current !== expectedCallbacks)) {
       return false;
     }
+    this.callbackOwners.delete(sessionKey);
     return this.platformCallbacks.delete(sessionKey);
   }
 
