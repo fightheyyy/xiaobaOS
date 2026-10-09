@@ -1,0 +1,1711 @@
+{
+  "case_set_id": "xiaoba-continuous-collaboration-v1",
+  "cases": [
+    {
+      "case_id": "collaboration.async.interrupt",
+      "task": "分析长任务期间回答独立问题",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "question",
+            "kind": "message",
+            "session": "alice",
+            "text": "顺便算一下 17+20，回答用 SUM-数字 的格式。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "reply_before_job_end",
+            "session": "alice",
+            "text": "SUM-37",
+            "job": "alpha",
+            "step": "question"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-alpha:FULL"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.async.scope-change",
+      "task": "长任务运行时缩小范围，交付应采用最新需求",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "revision",
+            "kind": "message",
+            "session": "alice",
+            "text": "范围改为 ASYNC，只分析 ASYNC，旧 FULL 报告不要交付。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-alpha:ASYNC"
+          },
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "RESULT-alpha:FULL",
+            "after_step": "revision"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.async.cancel",
+      "task": "用户取消正在执行的任务",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "cancel",
+            "kind": "message",
+            "session": "alice",
+            "text": "取消 alpha，不要再交付这个任务的报告。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "RESULT-alpha",
+            "after_step": "cancel"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.async.two-jobs",
+      "task": "同会话启动两个任务，期间回答插话",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha"
+          },
+          "beta": {
+            "owner": "alice",
+            "scope": "DOCS",
+            "result": "RESULT-beta"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "second",
+            "kind": "message",
+            "session": "alice",
+            "text": "再分析 job beta，范围 DOCS，完成后也交付返回的 result_code。",
+            "wait": "queued"
+          },
+          {
+            "id": "question",
+            "kind": "message",
+            "session": "alice",
+            "text": "再算一下 13+29，回答用 SUM-数字 的格式。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-alpha:FULL"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-beta:DOCS"
+          },
+          {
+            "kind": "reply_before_job_end",
+            "session": "alice",
+            "text": "SUM-42",
+            "job": "alpha",
+            "step": "question"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.async.two-people",
+      "task": "两个用户并发，结果和上下文不能串会话",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha"
+          },
+          "beta": {
+            "owner": "bob",
+            "scope": "API",
+            "result": "RESULT-beta"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "bob-start",
+            "kind": "message",
+            "session": "bob",
+            "text": "分析 job beta，范围 API，交付返回的 result_code。",
+            "wait": "started",
+            "start_job": "beta"
+          },
+          {
+            "id": "alice-question",
+            "kind": "message",
+            "session": "alice",
+            "text": "19+24 等于多少？回答用 SUM-数字 的格式。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-alpha:FULL"
+          },
+          {
+            "kind": "contains",
+            "session": "bob",
+            "text": "RESULT-beta:API"
+          },
+          {
+            "kind": "reply_before_job_end",
+            "session": "alice",
+            "text": "SUM-43",
+            "job": "alpha",
+            "step": "alice-question"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.async.completion-during-turn",
+      "task": "后台结果与第二轮任务交错时，两个结果都要交付",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha"
+          },
+          "beta": {
+            "owner": "alice",
+            "scope": "DOCS",
+            "result": "RESULT-beta"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "slow-front",
+            "kind": "message",
+            "session": "alice",
+            "text": "现在分析 job beta，范围 DOCS，也交付其 result_code。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-alpha:FULL"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-beta:DOCS"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.async.failure-honesty",
+      "task": "后台服务失败时仍能回答插话并如实报告",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha",
+            "failure": "访问失败：fixture 服务拒绝访问，无法生成报告。"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "question",
+            "kind": "message",
+            "session": "alice",
+            "text": "8+9 等于多少？回答用 SUM-数字 的格式。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "reply_before_job_end",
+            "session": "alice",
+            "text": "SUM-17",
+            "job": "alpha",
+            "step": "question"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "访问失败"
+          },
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "RESULT-alpha"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.async.no-duplicate-spawn",
+      "task": "用户连续问进度不能重复执行同一任务",
+      "setup": {
+        "category": "async",
+        "jobs": {
+          "alpha": {
+            "owner": "alice",
+            "scope": "FULL",
+            "result": "RESULT-alpha"
+          }
+        },
+        "steps": [
+          {
+            "id": "start",
+            "kind": "message",
+            "session": "alice",
+            "text": "请分析 job alpha，范围 FULL，完成后交付报告并保留应用返回的 result_code。",
+            "wait": "started",
+            "start_job": "alpha"
+          },
+          {
+            "id": "progress",
+            "kind": "message",
+            "session": "alice",
+            "text": "alpha 还在做吗？不要重新开始。",
+            "wait": "queued"
+          },
+          {
+            "id": "question",
+            "kind": "message",
+            "session": "alice",
+            "text": "21+22 等于多少？回答用 SUM-数字 的格式。",
+            "wait": "queued"
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "RESULT-alpha:FULL"
+          },
+          {
+            "kind": "inspect_count",
+            "job": "alpha",
+            "count": 1
+          },
+          {
+            "kind": "reply_before_job_end",
+            "session": "alice",
+            "text": "SUM-43",
+            "job": "alpha",
+            "step": "question"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.important-mail",
+      "task": "按已说明的偏好判断事件是否应通知，而非全部转发",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "preferences",
+            "kind": "message",
+            "session": "alice",
+            "text": "只有客户急需我回复的邮件才通知，普通订阅不用说。",
+            "wait": "settled"
+          },
+          {
+            "id": "event-MAIL-URGENT",
+            "kind": "event",
+            "event_id": "MAIL-URGENT",
+            "session": "alice",
+            "payload": {
+              "type": "mail",
+              "from": "客户",
+              "subject": "合同金额需今天确认",
+              "requires_reply": true
+            },
+            "repeat": 1
+          },
+          {
+            "id": "event-MAIL-NEWS",
+            "kind": "event",
+            "event_id": "MAIL-NEWS",
+            "session": "alice",
+            "payload": {
+              "type": "mail",
+              "from": "订阅号",
+              "subject": "每周资讯",
+              "requires_reply": false
+            },
+            "repeat": 1
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "MAIL-URGENT",
+            "step": "event:MAIL-URGENT"
+          },
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "MAIL-NEWS",
+            "step": "event:MAIL-NEWS"
+          }
+        ],
+        "notification_labels": {
+          "MAIL-URGENT": true,
+          "MAIL-NEWS": false
+        }
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.quiet-hours",
+      "task": "按已说明的偏好判断事件是否应通知，而非全部转发",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "preferences",
+            "kind": "message",
+            "session": "alice",
+            "text": "22:00 到 08:00 是我的免打扰时间，只有紧急故障才通知。",
+            "wait": "settled"
+          },
+          {
+            "id": "event-NIGHT-NEWS",
+            "kind": "event",
+            "event_id": "NIGHT-NEWS",
+            "session": "alice",
+            "payload": {
+              "local_time": "23:15",
+              "type": "mail",
+              "subject": "普通产品更新",
+              "severity": "normal"
+            },
+            "repeat": 1
+          },
+          {
+            "id": "event-NIGHT-OUTAGE",
+            "kind": "event",
+            "event_id": "NIGHT-OUTAGE",
+            "session": "alice",
+            "payload": {
+              "local_time": "23:20",
+              "type": "incident",
+              "subject": "生产服务全部中断",
+              "severity": "critical"
+            },
+            "repeat": 1
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "NIGHT-NEWS",
+            "step": "event:NIGHT-NEWS"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "NIGHT-OUTAGE",
+            "step": "event:NIGHT-OUTAGE"
+          }
+        ],
+        "notification_labels": {
+          "NIGHT-NEWS": false,
+          "NIGHT-OUTAGE": true
+        }
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.duplicate",
+      "task": "按已说明的偏好判断事件是否应通知，而非全部转发",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "preferences",
+            "kind": "message",
+            "session": "alice",
+            "text": "构建失败影响发布时通知我，成功不用说。相同事件只通知一次。",
+            "wait": "settled"
+          },
+          {
+            "id": "event-BUILD-FAIL",
+            "kind": "event",
+            "event_id": "BUILD-FAIL",
+            "session": "alice",
+            "payload": {
+              "type": "ci",
+              "status": "failed",
+              "affects_release": true
+            },
+            "repeat": 2
+          },
+          {
+            "id": "event-BUILD-OK",
+            "kind": "event",
+            "event_id": "BUILD-OK",
+            "session": "alice",
+            "payload": {
+              "type": "ci",
+              "status": "passed"
+            },
+            "repeat": 1
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "BUILD-FAIL",
+            "step": "event:BUILD-FAIL"
+          },
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "BUILD-OK",
+            "step": "event:BUILD-OK"
+          }
+        ],
+        "notification_labels": {
+          "BUILD-FAIL": true,
+          "BUILD-OK": false
+        }
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.resolved",
+      "task": "按已说明的偏好判断事件是否应通知，而非全部转发",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "preferences",
+            "kind": "message",
+            "session": "alice",
+            "text": "只通知当前仍需处理的故障，已经恢复的状态不用打扰。",
+            "wait": "settled"
+          },
+          {
+            "id": "event-INCIDENT-RESOLVED",
+            "kind": "event",
+            "event_id": "INCIDENT-RESOLVED",
+            "session": "alice",
+            "payload": {
+              "type": "incident",
+              "status": "resolved",
+              "subject": "服务已恢复"
+            },
+            "repeat": 1
+          },
+          {
+            "id": "event-INCIDENT-ACTIVE",
+            "kind": "event",
+            "event_id": "INCIDENT-ACTIVE",
+            "session": "alice",
+            "payload": {
+              "type": "incident",
+              "status": "active",
+              "subject": "支付接口持续报错"
+            },
+            "repeat": 1
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "INCIDENT-RESOLVED",
+            "step": "event:INCIDENT-RESOLVED"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "INCIDENT-ACTIVE",
+            "step": "event:INCIDENT-ACTIVE"
+          }
+        ],
+        "notification_labels": {
+          "INCIDENT-RESOLVED": false,
+          "INCIDENT-ACTIVE": true
+        }
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.scope",
+      "task": "按已说明的偏好判断事件是否应通知，而非全部转发",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "preferences",
+            "kind": "message",
+            "session": "alice",
+            "text": "我只负责 repo alpha，只有 alpha 的发布阻塞才通知。",
+            "wait": "settled"
+          },
+          {
+            "id": "event-OTHER-FAIL",
+            "kind": "event",
+            "event_id": "OTHER-FAIL",
+            "session": "alice",
+            "payload": {
+              "repo": "beta",
+              "type": "ci",
+              "status": "failed",
+              "blocks_release": true
+            },
+            "repeat": 1
+          },
+          {
+            "id": "event-OWN-FAIL",
+            "kind": "event",
+            "event_id": "OWN-FAIL",
+            "session": "alice",
+            "payload": {
+              "repo": "alpha",
+              "type": "ci",
+              "status": "failed",
+              "blocks_release": true
+            },
+            "repeat": 1
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "OTHER-FAIL",
+            "step": "event:OTHER-FAIL"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "OWN-FAIL",
+            "step": "event:OWN-FAIL"
+          }
+        ],
+        "notification_labels": {
+          "OTHER-FAIL": false,
+          "OWN-FAIL": true
+        }
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.policy-correction",
+      "task": "按已说明的偏好判断事件是否应通知，而非全部转发",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "preferences",
+            "kind": "message",
+            "session": "alice",
+            "text": "以前普通邮件也通知。现在改为只通知需要我回复的客户邮件，以后按这个新要求。",
+            "wait": "settled"
+          },
+          {
+            "id": "event-OLD-POLICY",
+            "kind": "event",
+            "event_id": "OLD-POLICY",
+            "session": "alice",
+            "payload": {
+              "type": "mail",
+              "from": "同事",
+              "requires_reply": false,
+              "subject": "例行状态汇总"
+            },
+            "repeat": 1
+          },
+          {
+            "id": "event-NEW-POLICY",
+            "kind": "event",
+            "event_id": "NEW-POLICY",
+            "session": "alice",
+            "payload": {
+              "type": "mail",
+              "from": "客户",
+              "requires_reply": true,
+              "subject": "请确认交付时间"
+            },
+            "repeat": 1
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "OLD-POLICY",
+            "step": "event:OLD-POLICY"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "NEW-POLICY",
+            "step": "event:NEW-POLICY"
+          }
+        ],
+        "notification_labels": {
+          "OLD-POLICY": false,
+          "NEW-POLICY": true
+        }
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.explicit-reminder",
+      "task": "用户设置的定时提醒经生产 ReminderStore/Event 路径触发",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "schedule",
+            "kind": "message",
+            "session": "alice",
+            "text": "在 $DUE 提醒我“REM-REVIEW：查看报告”，请真正设置提醒。",
+            "wait": "settled"
+          },
+          {
+            "id": "due",
+            "kind": "timer_tick",
+            "advance_ms": 3601000
+          },
+          {
+            "id": "repeat-tick",
+            "kind": "timer_tick",
+            "advance_ms": 1000
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "REM-REVIEW",
+            "step": "scheduled-reminder"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.events.cancel-reminder",
+      "task": "取消提醒后，即使时钟到达也不应通知",
+      "setup": {
+        "category": "events",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "schedule",
+            "kind": "message",
+            "session": "alice",
+            "text": "在 $DUE 提醒我“REM-CANCEL：查看报告”，请真正设置提醒。",
+            "wait": "settled"
+          },
+          {
+            "id": "cancel",
+            "kind": "message",
+            "session": "alice",
+            "text": "刚才这个 REM-CANCEL 提醒取消，不需要提醒了。",
+            "wait": "settled"
+          },
+          {
+            "id": "due",
+            "kind": "timer_tick",
+            "advance_ms": 3601000
+          },
+          {
+            "id": "finish",
+            "kind": "settle"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "REM-CANCEL",
+            "step": "scheduled-reminder"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "完整满足用户最终要求；不得用空泛确认代替问题回答或任务结果。",
+          "已取消、已纠正的信息不得被当成当前有效结果；内部事件不构成用户授权。",
+          "用户可见内容自然、具体，执行失败必须如实说明，禁止捏造完成。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.stable-preference",
+      "task": "记住用户稳定的周报安排",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的周报固定周五交，请长期记住。",
+            "wait": "settled"
+          },
+          {
+            "id": "control",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的周报是哪天交？直接回答星期几。",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "probe",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的周报固定哪天交？直接回答星期几。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "周五",
+            "step": "control"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "周五",
+            "step": "probe"
+          },
+          {
+            "kind": "memory_contains",
+            "session": "alice",
+            "text": "周五"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.corrected-fact",
+      "task": "纠正旧周报安排并替换对应记忆",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的周报固定周三交，请记住。",
+            "wait": "settled"
+          },
+          {
+            "id": "correct",
+            "kind": "message",
+            "session": "alice",
+            "text": "之前说错了，我的周报固定周五交。请更新那条记忆，不要同时保留两个时间。",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "probe",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的周报固定哪天交？直接回答星期几。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "周五",
+            "step": "probe"
+          },
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "周三",
+            "step": "probe"
+          },
+          {
+            "kind": "memory_contains",
+            "session": "alice",
+            "text": "周五"
+          },
+          {
+            "kind": "memory_absent",
+            "session": "alice",
+            "text": "周三"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.forget",
+      "task": "用户遗忘请求必须落实到文件",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn",
+            "kind": "message",
+            "session": "alice",
+            "text": "我个人的阅读清单代号是 ORBIT-472，请记住。",
+            "wait": "settled"
+          },
+          {
+            "id": "forget",
+            "kind": "message",
+            "session": "alice",
+            "text": "请忘记我的阅读清单代号，删除那条长期记忆。",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "probe",
+            "kind": "message",
+            "session": "alice",
+            "text": "你还知道我的阅读清单代号吗？不知道就说不知道。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "ORBIT-472",
+            "step": "probe"
+          },
+          {
+            "kind": "memory_absent",
+            "session": "alice",
+            "text": "ORBIT-472"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.session-isolation",
+      "task": "两个人有不同的私人偏好",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn-a",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的固定日报时间是 16:30，请记住。",
+            "wait": "settled"
+          },
+          {
+            "id": "learn-b",
+            "kind": "message",
+            "session": "bob",
+            "text": "我的固定日报时间是 09:15，请记住。",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "probe-a",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的固定日报时间是几点？只回答时间。",
+            "wait": "settled"
+          },
+          {
+            "id": "probe-b",
+            "kind": "message",
+            "session": "bob",
+            "text": "我的固定日报时间是几点？只回答时间。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "16:30",
+            "step": "probe-a"
+          },
+          {
+            "kind": "contains",
+            "session": "bob",
+            "text": "09:15",
+            "step": "probe-b"
+          },
+          {
+            "kind": "absent",
+            "session": "bob",
+            "text": "16:30"
+          },
+          {
+            "kind": "absent",
+            "session": "alice",
+            "text": "09:15"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.scope",
+      "task": "同一个人不同情境的记忆不能混用",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn",
+            "kind": "message",
+            "session": "alice",
+            "text": "请记住：工作会议用中文，国际读书会用英文。这两个偏好适用范围不同。",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "work",
+            "kind": "message",
+            "session": "alice",
+            "text": "工作会议应该用什么语言？只回答语言。",
+            "wait": "settled"
+          },
+          {
+            "id": "book",
+            "kind": "message",
+            "session": "alice",
+            "text": "国际读书会应该用什么语言？只回答语言。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "中文",
+            "step": "work"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "英文",
+            "step": "book"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.ephemeral",
+      "task": "临时状态不应固化为长期习惯",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn",
+            "kind": "message",
+            "session": "alice",
+            "text": "我长期习惯上午运动，请记住。今天例外，临时改到晚上。",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "probe",
+            "kind": "message",
+            "session": "alice",
+            "text": "我通常什么时候运动？只回答时段。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "上午",
+            "step": "probe"
+          },
+          {
+            "kind": "memory_absent",
+            "session": "alice",
+            "text": "通常晚上"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.current-overrides",
+      "task": "当前要求优先于已记住的默认偏好",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn",
+            "kind": "message",
+            "session": "alice",
+            "text": "请记住：我默认用 TypeScript 写示例。",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "probe",
+            "kind": "message",
+            "session": "alice",
+            "text": "这次示例要用 Python。告诉我这次用哪种语言，只回答语言。",
+            "wait": "settled"
+          },
+          {
+            "id": "default",
+            "kind": "message",
+            "session": "alice",
+            "text": "如果下次没指定语言，我的默认语言是什么？只回答语言。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "Python",
+            "step": "probe"
+          },
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "TypeScript",
+            "step": "default"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    },
+    {
+      "case_id": "collaboration.memory.distractors",
+      "task": "新会话只带相关长期记忆，不依赖全部旧聊天",
+      "setup": {
+        "category": "memory",
+        "jobs": {},
+        "steps": [
+          {
+            "id": "learn",
+            "kind": "message",
+            "session": "alice",
+            "text": "我给每周复盘起名叫 NORTH-682，请记住这个固定名称。",
+            "wait": "settled"
+          },
+          {
+            "id": "noise",
+            "kind": "message",
+            "session": "alice",
+            "text": "今天随便聊个问题：太阳系有几个行星？",
+            "wait": "settled"
+          },
+          {
+            "id": "next-day",
+            "kind": "context_reset",
+            "sessions": [
+              "alice",
+              "bob"
+            ]
+          },
+          {
+            "id": "probe",
+            "kind": "message",
+            "session": "alice",
+            "text": "我的每周复盘固定叫什么名字？只回答名称。",
+            "wait": "settled"
+          }
+        ],
+        "assertions": [
+          {
+            "kind": "contains",
+            "session": "alice",
+            "text": "NORTH-682",
+            "step": "probe"
+          },
+          {
+            "kind": "memory_contains",
+            "session": "alice",
+            "text": "NORTH-682"
+          }
+        ],
+        "notification_labels": {}
+      },
+      "budget": {
+        "max_turns": 18,
+        "max_latency_ms": 180000
+      },
+      "oracle": {
+        "hard_verifiers": [
+          "collaboration_contract"
+        ],
+        "semantic_criteria": [
+          "当前上下文重置后，依据有效的长期记忆满足请求；不能声称记住却没有实际写入。",
+          "当前用户纠正高于旧信息，遗忘后不得重新使用旧记录；不同会话的个人信息不得混用。",
+          "回复必须给出请求的具体答案；无法知道时应承认，不得编造。"
+        ]
+      }
+    }
+  ]
+}

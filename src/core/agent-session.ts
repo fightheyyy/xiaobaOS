@@ -40,6 +40,8 @@ export interface AgentServices {
   toolManager: ToolManager;
   skillManager: SkillManager;
   roleName?: string;
+  /** Trusted execution budget for bounded Replay; never a model argument. */
+  maxTurns?: number;
 
 }
 
@@ -477,7 +479,9 @@ export class AgentSession {
           this.activeSkillToolsets = detectedSkill?.metadata.toolsets;
         }
 
-        const effectiveMaxTurns = this.activeSkillMaxTurns ?? this.detectSkillMaxTurns();
+        const skillMaxTurns = this.activeSkillMaxTurns ?? this.detectSkillMaxTurns();
+        const effectiveMaxTurns = this.services.maxTurns === undefined ? skillMaxTurns
+          : Math.min(this.services.maxTurns, skillMaxTurns ?? this.services.maxTurns);
         const runner = new ConversationRunner(
           this.services.aiService,
           this.services.toolManager,

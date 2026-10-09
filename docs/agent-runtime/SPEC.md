@@ -50,6 +50,8 @@ Current addendum：每个 `SubAgentSession` 写入独立的标准 `logs/sessions
 
 Current addendum：Case Replay 现在默认使用专用只读 ToolManager，只暴露 `read_file`、`glob` 与 `grep`；正式 Case adapter 还会放入隔离子进程。显式 `workspace_write` Case 只有在 Arena/Evolution clean runtime 设置 enforced sandbox 时才能获得候选工作区的文件与 Shell 工具；delivery、Browser、GUI 和 Secretary 工具始终不注册。Source Candidate Test 复用统一 Anthropic Sandbox Runtime SDK：允许读取系统 runtime 与依赖、禁止读取生产源码，并且只允许写候选副本、测试临时目录与一次性 BrowserCat 短 runtime 根；两个会自行创建沙箱的 contract test file 仍在独立测试阶段运行，但该阶段本身也受 SDK 外层沙箱约束；不在宿主直接执行候选测试代码。沙箱不可用时 fail closed。
 
+连续协作 Replay 仅通过已有 trusted `subAgentServiceFactory` 额外注入封闭 fixture ToolManager 与 maxTurns。SubAgentToolExecutor 仍包裹它，子会话不能发送用户消息或调用主控制工具；不创建新角色。AgentServices 的 maxTurns 限制 Replay 主会话，普通用户 dispatch 缺省行为不变。固定模型实验可通过 AIService `disableFailover` 禁用备用 provider；该选项不来自模型参数。封闭 fixture 的采集 channel 不连接真实平台；详细评测边界归 Evaluation SPEC。
+
 Current addendum：code Finding 通过一次性 `delegate_code` 从 EvolutionCat 路由到 EngineerCat。EngineerCat 仍运行同一个 `SubAgentSession` / `ConversationRunner` loop，只在 secret-free 源码副本内写入。确定性 Source Candidate builder 显式隐藏 `codex_run`，候选完成完整 build、repository tests 和 shared Eval 后，source + dist 以可回滚文件事务替换，并只由下一进程加载；这不是第二套 XiaoBa runtime 或 Candidate lifecycle。
 
 Current addendum：显式配置 `allowedWriteRoot` 的窄 SubAgent workflow 现在同时约束文件写工具和 Shell。`write_file` / `edit_file` 拒绝绝对路径、`..` 与 symlink escape；文件工具与 Shell 都进入统一 SDK 边界，读取只恢复所需工作区/运行依赖，写入限于 `allowedWriteRoot` 和私有 HOME/TMP。普通 SubAgent 的文件写入也默认限制在任务工作区；SDK 不可用时 fail closed。EngineerCat 没有独立的内层写控制面，Scheduled Repair 直接在这套共享工具边界内运行。

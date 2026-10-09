@@ -1,7 +1,7 @@
 # Evaluation SPEC
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-10-09
 适用范围：Test、Case Replay、Agent Eval、Verifier、ReviewerCat Judge。
 
 本文是 XiaoBa-CLI `Evaluation` 模块的唯一架构真相源。
@@ -43,6 +43,8 @@ Out of scope:
 
 Replay 默认使用 `read_only` policy，只向被测 Agent 暴露 `read_file`、`glob` 和 `grep`。Case 可以显式声明 `workspace_write`，但该模式只有在 Arena/Evolution 提供 enforced clean runtime 时才开放工作区文件与 Shell 工具；外部消息、Browser、GUI 和 Secretary 工具不属于 Replay 能力集。
 
+连续协作 Case 使用专用 `collaboration-replay` adapter：隔离进程里的真实 AgentSession、MessageSessionManager、SubAgentSession 和 EventDispatcher 驱动封闭应用 fixture；channel 只记录消息，不接外部平台。主/子会话的工具定义与执行均有 allowlist，不注册宿主 Shell、文件或真实连接器。EvolutionCat 的 `remember` 只写该运行工作区的当前 session 记忆。它不是可任意写入的 workspace_write Replay，也不创建另一套 Agent loop 或裁决引擎。
+
 ```mermaid
 flowchart LR
     Replay --> Execution["Shell / file tools / bounded workers"]
@@ -51,6 +53,7 @@ flowchart LR
     Test --> TestResult["test-result.json"]
 
     Case["Case + Oracle"] --> Replay["Case Replay"]
+    Collaboration["Continuous collaboration Case + capability baseline"] --> Replay
     Replay --> Trace["fresh Trace"]
     Trace --> Verifier["Verifier hard checks"]
     Verifier -->|pass| Reviewer["ReviewerCat Judge"]
@@ -68,6 +71,7 @@ flowchart LR
     Execution["Shell / bounded worker"] --> Sandbox["Shared SandboxExecutor / Anthropic SDK"]
     Sandbox --> Native["Seatbelt on macOS / Bubblewrap on Linux"]
     CaseSet["CaseSet"] --> Eval["Shared Evaluation"]
+    Collaboration["Continuous collaboration + paired ablations"] --> Eval
     Eval --> Replay["Replay real Agent"]
     Replay --> Trace["Trace"]
     Trace --> Verify["Verifier"]
@@ -165,6 +169,35 @@ output/eval/                       generated Eval evidence
 - `npm run replay:trace`：历史 Trace 输入兼容入口；产生 fresh Trace。
 - `xiaoba eval run --case-set <file>`：真实 Agent CaseSet Evaluation。
 - `xiaoba eval run --case-set eval/case-sets/xiaoba-core-readonly.json`：维护中的只读核心 CaseSet。
+- `npm run eval:collaboration -- --dry-run --runs 1`：校验 24 个连续协作 Case 的 48 次双版本执行矩阵，不调用模型或生成成功率。
+- `npm run eval:collaboration -- --live --case interrupt --runs 1`：真实模型小规模同步/异步对照。
+- `npm run eval:collaboration -- --live --runs 3`：24 Case × 2 版本 × 3 次 = 144 条完整轨迹。
+- `npm run eval:collaboration -- --live --category memory --runs 3`：只测按会话隔离的文件记忆。
+- `npm run test:collaboration`：工程测试；包含预写 provider 的真实 loop 验证，不能当成 Agent Eval 数字。
+
+## Continuous collaboration protocol
+
+维护集：`eval/case-sets/continuous-collaboration.json`，包含各 8 个 async / events / memory 情境。Case 只预设用户输入、外部事件、fixture 工作环境与 Oracle，不预写被测模型行为。`scripts/run-collaboration-eval.ts` 只是 CLI 组合层：Replay 产出新 Trace，专用硬检查后调用共享 `runEvaluation` 和 fresh 只读 ReviewerCat；Outcome 仍是唯一裁决。每个情境/重复轮交替两个版本的运行顺序。
+
+| 场景 | Baseline | 控制条件 |
+| --- | --- | --- |
+| Async | sync-single-session：隐藏 spawn/check/stop/resume 控制工具，在单 session FIFO 内同步工作；跨 session 仍并行 | 相同模型、温度、工作延迟、应用工具、请求序列与预算 |
+| Memory | current-context-only：当前对话仍可用，但不注入/读写长期记忆 | 两边在相同步骤重置上下文；候选只靠自身实际写入的文件记忆恢复信息 |
+| Events | relay-all-events：每个到达事件都直接转发的无模型规则基线 | 相同用户偏好、外部事件和预标注通知标签；候选使用真实模型判定和 EventDispatcher 去重；不拿这个规则基线证明模型更省 tokens |
+
+硬检查包括有效插话发生在长任务完成前、最新范围交付、取消后不交付、真实执行凭据、正确会话、无重复结果/事件通知、记忆内容与生产提醒路径实际设置。预期的取消/服务失败不是所有工具均须 success；禁止模型把执行失败包装成完成。硬检查通过后 Reviewer 判断整个情境的语义、最终需求与诚实交付。
+
+`plan.json` 记录 revision/dirty、CaseSet digest、Node/platform、顺序、fixture 延迟和预算。每个运行保留 `trajectory.json`、新 `trajectory.jsonl`、原生 logs 和唯一 `evaluation-result.json`；`measurements.json` / `comparison.json` / `comparison.md` 只投影这些事实。报告包括完整情境成功率（blocked 单列且包含在总分母）、可判断配对、通知准确率/覆盖率、精确算术回答的插话 P50/P95 及样本数、Subject/child 模型调用和 tokens。缺少 usage 时执行 blocked，不能把未知成本填零。
+
+用户补救次数默认未测得。本集没有自动模拟救场；人工标注只在附带原始证据时有效，正常需求变化和必要授权不算补救。复制生成的 `rescue-annotations.template.json`，填写所审核运行的非负整数 `rescue_count` 和 `evidence`，删除未审核项后运行：
+
+```bash
+npm run eval:collaboration -- --report-only output/eval/continuous-collaboration/<run> --annotations /path/to/reviewed-annotations.json
+```
+
+本地需 Node >= 22.12、`npm ci` 和已配置的模型（原有 `.env` 或 `xiaoba config`）。默认 dry-run；`--live` 才调用模型。新 `--out` 必须为空，结果不可覆盖。模型主备切换关闭，Reviewer 也用相同模型/温度和空工具 allowlist；Subject token/调用统计不包含 Reviewer。真实模型 run 超时/凭据/usage 失败时停止后续执行并保留已完成证据。
+
+限制：定时器用生产 ReminderStore + EventDispatcher 和模拟时钟，跨日用显式上下文重置；应用为固定延迟 fixture，通知标签针对这套有限情境。结果不能外推成真实 connector、桌面驱动吞吐或 7×24 稳定性。Scripted 工程证据被 hard Verifier 和比较报告拒绝，不能进入行为能力数字。
 
 ## Interaction With Other Modules
 

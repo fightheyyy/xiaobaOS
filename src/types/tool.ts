@@ -185,6 +185,9 @@ export interface SubAgentServiceFactoryInput {
 export interface SubAgentServiceFactoryResult {
   aiService: unknown;
   skillManager: unknown;
+  /** Runtime-owned fixture tools; never supplied by model arguments. */
+  toolManager?: import('../tools/tool-manager').ToolManager;
+  maxTurns?: number;
 }
 
 /**

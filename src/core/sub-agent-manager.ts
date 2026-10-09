@@ -104,7 +104,7 @@ export class SubAgentManager {
     workingDirectory: string,
     aiService: AIService,
     skillManager: SkillManager,
-    spawnOptions: Pick<SubAgentSpawnOptions, 'roleName' | 'allowSkillSelection' | 'observabilityContext' | 'parentSessionId'> = {},
+    spawnOptions: Pick<SubAgentSpawnOptions, 'roleName' | 'allowSkillSelection' | 'observabilityContext' | 'parentSessionId' | 'toolManager' | 'maxTurns'> = {},
   ): SubAgentInfo | { error: string } {
     // 并发限制
     const active = this.listByParent(parentSessionKey,workingDirectory).filter(s => SubAgentManager.isActiveStatus(s.status));
@@ -137,6 +137,8 @@ export class SubAgentManager {
       allowSkillSelection: spawnOptions.allowSkillSelection ?? Boolean(spawnOptions.roleName && !skillName),
       observabilityContext: spawnOptions.observabilityContext,
       parentSessionId: spawnOptions.parentSessionId ?? parentSessionKey,
+      toolManager: spawnOptions.toolManager,
+      maxTurns: spawnOptions.maxTurns,
       notifyParent: async (subAgentId, taskDesc, question) => {
         const msg = `[子智能体 ${subAgentId} 反馈]\n任务：${taskDesc}\n需要你的指示：${question}`;
         if(this.platformCallbacks.get(parentSessionKey)!==platform) throw new Error('Parent callback is no longer registered.');

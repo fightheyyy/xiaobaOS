@@ -47,6 +47,8 @@ export interface SubAgentInfo {
 }
 
 export interface SubAgentSpawnOptions {
+  /** Trusted Replay tool environment; ordinary role dispatch uses native tools. */
+  toolManager?: ToolManager;
   /** Runtime-owned state journal callback; no new execution authority. */
   onStateChange?: (info: SubAgentInfo) => void;
   /** Narrow runtime-owned turn budget; normal role dispatch keeps the existing default. */
@@ -246,10 +248,11 @@ export function createSubAgentToolExecutor(
     hiddenTools?: string[];
     allowedTools?: string[];
     allowedWriteRoot?: string;
+    toolManager?: ToolManager;
   } = {},
 ): SubAgentToolExecutor {
   return new SubAgentToolExecutor(
-    createSubAgentToolManager(workingDirectory, subAgentId, roleName, {
+    options.toolManager ?? createSubAgentToolManager(workingDirectory, subAgentId, roleName, {
       parentSessionId: options.parentSessionId,
       abortSignal: options.abortSignal,
     }),
@@ -448,6 +451,7 @@ export class SubAgentSession {
         hiddenTools: this.options.hiddenTools,
         allowedTools: this.options.allowedTools,
         allowedWriteRoot: this.options.allowedWriteRoot,
+        toolManager: this.options.toolManager,
       },
     );
 

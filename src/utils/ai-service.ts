@@ -56,6 +56,8 @@ interface ProviderCallError extends Error {
 
 export interface AIServiceOptions {
   arenaComponent?: ArenaProviderCallComponent;
+  /** Fixed-model experiments must not silently switch to a backup model. */
+  disableFailover?: boolean;
 }
 
 /**
@@ -84,6 +86,7 @@ export class AIService {
   private providerChain: ProviderEndpoint[];
   private arenaComponent?: ArenaProviderCallComponent;
   private arenaScopeId?: string;
+  private disableFailover: boolean;
 
   constructor(overrides?: Partial<ChatConfig>, options: AIServiceOptions = {}) {
     this.config = {
@@ -92,6 +95,7 @@ export class AIService {
       ...(overrides || {})
     };
     this.arenaComponent = options.arenaComponent;
+    this.disableFailover = options.disableFailover === true;
     this.providerChain = this.buildProviderChain();
   }
 
@@ -131,7 +135,7 @@ export class AIService {
       provider: this.createProvider(primaryConfig),
     });
 
-    for (const backup of arenaLiveAuditEnabled() ? [] : this.loadBackupConfigsFromEnv()) {
+    for (const backup of arenaLiveAuditEnabled() || this.disableFailover ? [] : this.loadBackupConfigsFromEnv()) {
       chain.push({
         label: backup.label,
         config: backup.config,

@@ -6,6 +6,8 @@ Owner：Runtime maintainers
 
 ## Current Status
 
+- 连续协作 Replay 的 trusted factory 支持注入受控子会话 ToolManager/turn budget；主会话支持显式 maxTurns，AIService 可禁用模型主备切换。普通 Role dispatch 缺省路径不变。异步、记忆和提醒集成工程验证已通过；真实模型验收由 Evaluation PLAN 跟踪。
+
 - `AgentSession` + `ConversationRunner` is the single model-driven loop for Base and all roles.
 - ToolManager enforces base / role / surface layers, role visibility and confirmed-tool gates.
 - Tool results, delivery evidence, artifact manifests, provider failures and context compaction have structured runtime facts.

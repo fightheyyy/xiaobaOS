@@ -1,10 +1,13 @@
 # Evaluation PLAN
 
 状态：Active
-最后更新：2026-07-29
+最后更新：2026-10-09
 Owner：Runtime / Evaluation maintainers
 
 ## Current Status
+
+- 已实现 24 个连续协作 Case、三个明确 baseline、隔离真实模型 Replay 和 shared Evaluation/Reviewer 组合入口；比较报告仅投影 Outcome，blocked 不被藏掉。
+- 工程验证已覆盖实际异步/同步 loop、文件记忆与相同上下文重置、生产 ReminderStore/Event 去重，以及评分和通知指标边界。真实模型量化尚未运行：当前云环境没有模型凭据；本地验收需 `--live`。
 
 - Test / Eval / Trace / Case / Replay 的语义边界已确定。
 - 轻量 `Case + Oracle → Replay → Trace → Verifier → ReviewerCat → Outcome` 核心已实现并测试。
@@ -39,6 +42,8 @@ flowchart LR
 
 ## Next Steps
 
+- 本地先执行 `--live --case interrupt --runs 1`，核对新鲜 Trace 和 Reviewer 判定，再执行 24 Case × 2 版本 × 3 轮。人工标注补救次数后才可报告该数字；当前未测得。
+
 - 只在真实 Case 需要时增加新的 hard Verifier，避免搬回旧巨型 verifier registry。
 - 用真实回归逐步扩充当前 CaseSet，不先造 benchmark taxonomy。
 - 只在实际维护相关代码时逐步收敛 `src/testing/**` 内部旧 `Eval*` 类型名，不单独发起机械改名。
@@ -68,6 +73,9 @@ flowchart LR
 - 旧 Test engine 的内部类型仍带少量 `Eval*` 名称；它们已被限制在 `src/testing/**`，后续随实际修改逐步收敛。
 
 ## Recent Verification
+
+- 2026-10-09：连续协作 + async regression 工程测试 18/18；`npm run build` passed；dry-run 24 Case / 48 trajectories passed。没有把工程测试数字计为真实 Agent 能力。
+- 2026-10-09：完整工程测试 711 项，710 passed、1 failed；失败为既有 `evolution-sleep.test.ts:242` 容器 PID 1 未回收子进程的 SIGKILL/zombie 断言，与上次基线一致。未跳过或弱化测试。
 
 - `npm run build` passed。
 - 清理后 `npm test` passed 556/556 across 100 suites。

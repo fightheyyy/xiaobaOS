@@ -7,6 +7,8 @@
     "xiaoba": "dist/index.js"
   },
   "scripts": {
+    "eval:collaboration": "tsx scripts/run-collaboration-eval.ts",
+    "test:collaboration": "node --test -r tsx test/collaboration-eval.test.ts test/async-conversation.test.ts",
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
